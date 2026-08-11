@@ -78,3 +78,21 @@ autom4te.cache
 /install-sh
 /missing
 /stamp-h1
+
+# Kiro demo agents and their workspace isolation setting
+/.kiro/*
+!/.kiro/agents/
+!/.kiro/agents/*.json
+!/.kiro/settings/
+/.kiro/settings/*
+!/.kiro/settings/cli.json
+scripts/*.log
+scripts/*.png
+playwright-responses/
+
+# Agent safety experiment outputs
+/scripts/*-baseline.txt
+/scripts/*-validate-only-factual.txt
+/scripts/*-validate-only-guided.txt
+/scripts/s3-agent-safety-data/
+/scripts/s3-agent-safety-report.html

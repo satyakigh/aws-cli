@@ -32,6 +32,7 @@ classifiers = [
 ]
 dependencies = [
     "colorama>=0.2.5,<0.4.7",
+    "cloudformation-validate==1.8.0",
     "docutils>=0.10,<0.20",
     "ruamel_yaml>=0.15.0,<=0.19.1",
     # ruamel_yaml only requires ruamel_yaml_clib for Python versions
@@ -59,6 +60,7 @@ include = [
     "CHANGELOG.rst",
     "tests/**/*",
     "requirements/**/*.txt",
+    "requirements/wheels/*.whl",
     "configure",
     "Makefile.in",
     "exe/**/*",

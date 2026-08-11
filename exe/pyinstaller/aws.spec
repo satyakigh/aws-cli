@@ -2,13 +2,18 @@
 import platform
 import os
 
+from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules
+
 block_cipher = None
 exe_name = 'aws'
 
+cfn_validate_binaries = collect_dynamic_libs('cloudformation_validate')
+cfn_validate_hidden_imports = collect_submodules('cloudformation_validate')
+
 aws_a = Analysis(['../../bin/aws'],
-             binaries=[],
+             binaries=cfn_validate_binaries,
              datas=[],
-             hiddenimports=[],
+             hiddenimports=cfn_validate_hidden_imports,
              hookspath=['.'],
              runtime_hooks=[],
              excludes=['cmd', 'code', 'pdb'],

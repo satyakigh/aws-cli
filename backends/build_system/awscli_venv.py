@@ -19,6 +19,8 @@ import sys
 
 from constants import (
     BIN_DIRNAME,
+    CFN_VALIDATE_REQUIREMENTS,
+    CFN_VALIDATE_WHEEL_DIR,
     CLI_SCRIPTS,
     DISTRIBUTION_SOURCE_SANDBOX,
     DOWNLOAD_DEPS_BOOTSTRAP_LOCK,
@@ -58,6 +60,7 @@ class AwsCliVenv:
                 self._install_requirements(SYSTEM_SANDBOX_REQUIREMENTS_LOCK)
         else:
             self._copy_parent_packages()
+        self._install_cfn_validate()
         self._install_awscli()
         self._update_metadata()
         self._update_windows_script_header()
@@ -79,6 +82,23 @@ class AwsCliVenv:
         self._pip_install(
             ["--no-build-isolation", "-r", requirements_file],
             cwd=cwd,
+        )
+
+    def _install_cfn_validate(self):
+        self._pip_install(
+            [
+                "--no-build-isolation",
+                "--no-cache-dir",
+                "--no-index",
+                "--only-binary=:all:",
+                "--find-links",
+                str(CFN_VALIDATE_WHEEL_DIR),
+                "--require-hashes",
+                "--no-deps",
+                "--force-reinstall",
+                "-r",
+                str(CFN_VALIDATE_REQUIREMENTS),
+            ]
         )
 
     def _install_awscli(self):
