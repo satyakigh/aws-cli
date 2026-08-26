@@ -88,10 +88,10 @@ scripts/*.log
 scripts/*.png
 playwright-responses/
 
-# Agent safety experiment outputs. The generated reports (HTML one and the
-# one-pass Markdown one) are intentionally NOT ignored. The raw, disposable
-# evidence is: human-readable .txt transcripts, supplementary .jsonl raw
-# event streams, and the aggregated data directory.
+# Agent safety experiment outputs. The generated Markdown reports are
+# intentionally NOT ignored. The raw, disposable evidence is: human-readable
+# .txt transcripts, supplementary .jsonl raw event streams, and the aggregated
+# data directory.
 /scripts/*-baseline.txt
 /scripts/*-validate-only-factual.txt
 /scripts/*-validate-only-guided.txt

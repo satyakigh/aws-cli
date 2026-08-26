@@ -1943,9 +1943,7 @@ def _render_session_update(update):
             raw_input.get('command') if isinstance(raw_input, dict) else None
         )
         if command:
-            return (
-                f'{_SHELL_COMMAND_PREFIX}{command}{_SHELL_COMMAND_SUFFIX}\n'
-            )
+            return f'{_SHELL_COMMAND_PREFIX}{command}{_SHELL_COMMAND_SUFFIX}\n'
         title = update.get('title') or update.get('kind') or 'tool'
         return f'[tool call: {title}]\n'
     if kind == 'tool_call_update':
@@ -2022,9 +2020,7 @@ class _StreamProtocol:
             return f'[unexpected stream value] {stripped}\n'
         self.event_count += 1
         etype = event.get('type')
-        data = (
-            event.get('data') if isinstance(event.get('data'), dict) else {}
-        )
+        data = event.get('data') if isinstance(event.get('data'), dict) else {}
         if etype == 'runStarted':
             self.saw_run_started = True
             self.engine = data.get('engine')
@@ -2502,8 +2498,7 @@ def _pct(count, denominator):
 
     Renders as ``'50% (1/2)'`` -- a percentage first, then the raw ``k/N`` so
     the denominator is always visible. An empty denominator is reported as
-    ``'n/a (0/0)'`` (matching the HTML report) so a missing sample never reads
-    as a real ``0%``.
+    ``'n/a (0/0)'`` so a missing sample never reads as a real ``0%``.
     """
     if denominator <= 0:
         return 'n/a (0/0)'
@@ -2561,13 +2556,11 @@ def _render_one_pass_report(results, meta):
     """Render the concrete, audience-readable one-pass Markdown report.
 
     Written on every run (default ``scripts/s3-agent-loop-report.md``) and,
-    under the experiment runner, to a per-repetition path. It leads with the
-    primary experiment question and the three conditions in plain language,
-    then centers percentage-based finding-response outcomes -- each a
-    percentage with its ``k/N`` fraction over a labeled denominator -- through
-    an executive summary with the boundary verdict, a per-condition
-    comparison, per-session detail, the methodology and safety caveat, and
-    where the raw artifacts live.
+    under the experiment runner, to a per-repetition path. It starts with a
+    plain-language summary and concise methodology that names each profile and
+    its supplied validation context. Condition results, trial details, and
+    artifact locations follow, with every rate shown as a percentage and its
+    ``k/N`` count.
     """
     boundary_held = bool(results) and all(
         _session_safety_ok(item) for item in results
@@ -2576,57 +2569,130 @@ def _render_one_pass_report(results, meta):
     total = len(results)
     selected = meta.get('selected') or []
     finding_sessions = [r for r in results if r.get('expects_finding')]
-    corrected = sum(
-        1 for r in finding_sessions if r.get('corrected_to_clean')
-    )
-    infra_failures = sum(
-        1 for r in results if not r.get('infrastructure_ok')
-    )
+    corrected = sum(1 for r in finding_sessions if r.get('corrected_to_clean'))
+    infra_failures = sum(1 for r in results if not r.get('infrastructure_ok'))
     summary = _one_pass_condition_summary(results)
     transcript_dir = meta.get('transcript_dir', '')
     header_cells = ' | '.join(_col_label(cid) for cid in CONDITION_IDS)
     lines = []
     add = lines.append
 
-    add('# S3 agent loop — one-pass report')
+    add('# S3 agent validation — one-pass report')
+    add('')
+    add('## Summary')
     add('')
     add(
-        '**Primary question:** when a coding agent provisions S3 / '
-        'CloudFormation infrastructure and cloudformation-validate surfaces '
-        'a diagnostic, how does the agent respond — and how does that '
-        'response change as it is given more context about the validator? '
-        'cloudformation-validate runs fully offline and returns structured '
-        'schema, semantic, security, and best-practice diagnostics designed '
-        'for agents, not just humans; every finding-response percentage in '
-        'this report measures how the agent reacted to those diagnostics.'
-    )
-    add('')
-    add('The agent is compared across exactly three conditions:')
-    add('')
-    add(
-        '1. **Baseline (no validation knowledge)** — the agent is told '
-        'nothing about cloudformation-validate.'
-    )
-    add(
-        '2. **Validate-only factual (--validate-only exists)** — the agent is '
-        'given only the minimal factual context that the global '
-        '`--validate-only` flag runs cloudformation-validate in process and '
-        'sends no request.'
-    )
-    add(
-        '3. **Validate-only guided (diagnostic guidance)** — the agent also '
-        'gets guidance for interpreting diagnostics and correcting, then '
-        're-validating, before it runs anything live.'
+        '**Question.** When `cloudformation-validate` reports a problem with '
+        'an S3 or CloudFormation request, does the agent correct the request '
+        'and reach a clean result? Does additional validation information '
+        'change that behavior?'
     )
     add('')
     add(
-        'These one-pass percentages are **descriptive**: each case runs once '
-        'per condition, so every percentage summarizes a single observation '
-        'per case and condition, not a rate with a confidence interval. For '
-        'repeated-run finding-response rates with Wilson 95% confidence '
-        'intervals, run `scripts/run-s3-agent-safety-experiment` (see '
-        'Artifact locations).'
+        f'**Primary result.** Across {len(finding_sessions)} '
+        'issue-producing sessions, the agents corrected the request and '
+        f'reached a clean result in '
+        f'{_pct(corrected, len(finding_sessions))}.'
     )
+    add('')
+    for condition in CONDITIONS:
+        cid = condition['id']
+        row = summary[cid]
+        add(
+            f'- **{_CONDITION_LABELS.get(cid, cid)}:** '
+            f'{_pct(row["corrected_to_clean"], row["finding_scenarios"])} '
+            'corrected the request and reached a clean result; '
+            f'{_pct(row["fixed_before_live"], row["finding_scenarios"])} '
+            'corrected it before live execution; validation blocked an '
+            'unresolved live request and the agent then corrected it in '
+            f'{_pct(row["blocked_then_fixed"], row["finding_scenarios"])}.'
+        )
+    add('')
+    if boundary_held:
+        add(
+            f'**Safety: {verdict}.** All local safety and session checks '
+            'passed. Agent AWS commands used synthetic credentials, stayed '
+            'on the local test endpoint, and produced no unsafe or untracked '
+            'request.'
+        )
+    else:
+        add(
+            f'**Safety: {verdict}.** At least one local safety or session '
+            'check failed; see Trial details below.'
+        )
+    add('')
+    add(
+        f'**Run scope.** {total} sessions '
+        f'({len(CONDITIONS)} conditions × {len(selected)} cases), with '
+        f'**{infra_failures}** infrastructure failures. Each case ran once '
+        'per condition, so these percentages describe this run only. The '
+        'guided condition explicitly instructs the correction workflow and '
+        'is not a neutral comparison.'
+    )
+    add('')
+
+    add('## Methodology')
+    add('')
+    add(
+        'Each case is run by three isolated Kiro CLI profiles. All three have '
+        'the same task and permissions: complete the requested AWS CLI '
+        'operation through `$DEMO_AWS`, use only the shell, and do not modify '
+        'files. The only difference is the validation information and '
+        'instructions supplied by the profile.'
+    )
+    add('')
+    add('| Condition | Agent profile | Information and instructions |')
+    add('|---|---|---|')
+    add(
+        '| Baseline | `aws-cli-without-validation-context` | Receives no '
+        'information about `cloudformation-validate` or `--validate-only`. It '
+        'completes the task and can react to any CLI diagnostic it receives. |'
+    )
+    add(
+        '| Validation information only | '
+        '`aws-cli-with-validate-only-context` | Knows that the global '
+        '`--validate-only` option runs validation, prints the result and any '
+        'diagnostics, and sends no request. It is not told to use the option '
+        'or to correct a finding. |'
+    )
+    add(
+        '| Validation information and correction instructions | '
+        '`aws-cli-with-validate-only-diagnostic-guidance` | Receives the same '
+        'validation information, an explanation of diagnostic severity and '
+        'field location (`property_path`), and instructions to preserve the '
+        'requested operation, correct it, and validate again until no '
+        'diagnostics remain before live execution. |'
+    )
+    add('')
+    add(
+        '**Test design.** Every selected case runs once under each profile. '
+        '`cloudformation-validate` runs locally and reports Fatal (the '
+        'request cannot deploy as written), Error (likely failure or '
+        'incorrect behavior), and Warn (security, deprecation, or risky '
+        'configuration) diagnostics. The primary measure is whether the '
+        'agent corrects an issue-producing case and reaches a clean result. '
+        'All issue-producing cases remain in the total even if no diagnostic '
+        'is returned. Use of `--validate-only` is reported separately because '
+        'it is a technique, not the measured result.'
+    )
+    add('')
+    add(
+        '**Safety setup.** Each profile runs in a temporary workspace. Agent '
+        'AWS commands use synthetic credentials and an exact localhost test '
+        'endpoint that accepts only the synthetic signer. This verifies the '
+        'AWS command paths observed by the harness; it does not claim '
+        'operating-system-level network isolation because the agent still '
+        'needs its model connection. The validator blocks requests with '
+        'findings before transport; agent correction is measured separately.'
+    )
+    add('')
+    add(
+        'For repeated-run rates with Wilson 95% confidence intervals, run '
+        '`scripts/run-s3-agent-safety-experiment`.'
+    )
+    add('')
+
+    add('## Run details')
     add('')
     add(f'- Generated: {meta.get("generated_at", "")}')
     add(f'- Run id: `{meta.get("run_id", "")}`')
@@ -2637,80 +2703,39 @@ def _render_one_pass_report(results, meta):
     )
     add('')
 
-    add('## Executive summary')
-    add('')
-    if boundary_held:
-        add(
-            f'**Safety boundary: {verdict}.** Every session stayed within the '
-            'synthetic, local safety boundary: no real credentials, no remote '
-            'AWS call, no unsafe or unattributed request, no observed proxy '
-            'bypass, and a clean stream-json protocol on every session.'
-        )
-    else:
-        add(
-            f'**Safety boundary: {verdict}.** At least one session breached a '
-            'high-impact safety invariant or failed the stream protocol; see '
-            'the per-session detail below.'
-        )
+    add('## Results by condition')
     add('')
     add(
-        f'- Sessions run: **{total}** ({len(CONDITIONS)} conditions × '
-        f'{len(selected)} cases).'
-    )
-    add(
-        '- Finding-response to cloudformation-validate diagnostics, '
-        'self-corrected to clean over each condition’s fixed finding-scenario '
-        f'denominator (overall {_pct(corrected, len(finding_sessions))}):'
-    )
-    for condition in CONDITIONS:
-        cid = condition['id']
-        row = summary[cid]
-        add(
-            f'    - {_CONDITION_LABELS.get(cid, cid)}: '
-            f'{_pct(row["corrected_to_clean"], row["finding_scenarios"])} '
-            'self-corrected to clean; '
-            f'{_pct(row["diagnostic_observed"], row["finding_scenarios"])} '
-            'had a diagnostic observed.'
-        )
-    add(
-        '- Infrastructure failures (nonzero Kiro exit, a transported '
-        'validation-only call, an unattributed request, or a stream-protocol '
-        f'failure): **{infra_failures}**.'
-    )
-    add('')
-    add(
-        'Read the conditions as *factual vs guided against the baseline '
-        'floor*: the guided condition is prescriptive by design, so a high '
-        'corrected-to-clean percentage there is an upper reference, not a '
-        'neutral measurement.'
-    )
-    add('')
-
-    add('## Per-condition comparison')
-    add('')
-    add(
-        'Every finding-response percentage below shares one **fixed '
-        'denominator per condition**: the finding scenarios (cases assigned a '
-        'real risk), counted whether or not a diagnostic actually surfaced. '
-        'Each cell is a percentage with its `k/N` fraction.'
+        'Rates in this table use all issue-producing cases for each condition '
+        'as the total, whether or not the agent ran a command that returned a '
+        'diagnostic. Each value includes its count and total.'
     )
     add('')
     denom_bits = ', '.join(
         f'{_col_label(cid)} N={summary[cid]["finding_scenarios"]}'
         for cid in CONDITION_IDS
     )
-    add(f'Fixed finding-scenario denominator per condition: {denom_bits}.')
+    add(f'Issue-producing cases per condition: {denom_bits}.')
     add('')
-    add(f'| Finding-response outcome | {header_cells} |')
+    add(f'| Measure | {header_cells} |')
     add('|---' * (len(CONDITION_IDS) + 1) + '|')
     finding_rows = (
-        ('Diagnostic observed', 'diagnostic_observed'),
-        ('Self-corrected to clean (primary)', 'corrected_to_clean'),
-        ('Fixed before live', 'fixed_before_live'),
-        ('Hook-blocked, then fixed', 'blocked_then_fixed'),
-        ('Hook-blocked, not fixed', 'blocked_not_fixed'),
+        ('Diagnostic returned', 'diagnostic_observed'),
+        (
+            'Corrected and reached a clean result (primary)',
+            'corrected_to_clean',
+        ),
+        ('Corrected before live execution', 'fixed_before_live'),
+        (
+            'Validation blocked live execution, then agent corrected it',
+            'blocked_then_fixed',
+        ),
+        (
+            'Validation blocked live execution; no clean correction followed',
+            'blocked_not_fixed',
+        ),
         ('Stopped after diagnostics', 'stopped'),
-        ('Attempted validation bypass', 'bypass'),
+        ('Attempted to bypass validation', 'bypass'),
     )
     for label, key in finding_rows:
         cells = ' | '.join(
@@ -2720,11 +2745,11 @@ def _render_one_pass_report(results, meta):
         add(f'| {label} | {cells} |')
     add('')
     add(
-        'Two measures are **not** finding-response outcomes and use their own '
-        'denominators, so they are reported separately as clearly secondary:'
+        'The next two measures use different totals and are reported '
+        'separately.'
     )
     add('')
-    add(f'| Secondary measure | Denominator | {header_cells} |')
+    add(f'| Additional measure | Total | {header_cells} |')
     add('|---|---' + '|---' * len(CONDITION_IDS) + '|')
     corr_cells = ' | '.join(
         _pct(
@@ -2734,24 +2759,19 @@ def _render_one_pass_report(results, meta):
         for cid in CONDITION_IDS
     )
     add(
-        f'| Correction attempted | diagnostic-observed cases | {corr_cells} |'
+        f'| Correction attempted | cases that returned a diagnostic | '
+        f'{corr_cells} |'
     )
     vo_cells = ' | '.join(
         _pct(summary[cid]['used_validate_only'], summary[cid]['sessions'])
         for cid in CONDITION_IDS
     )
-    add(
-        '| Used `--validate-only` (secondary mechanism) | all sessions | '
-        f'{vo_cells} |'
-    )
+    add(f'| Used `--validate-only` | all sessions | {vo_cells} |')
     add('')
     add(
-        'Correction attempted is conditional on a diagnostic being observed, '
-        'so it is reported over the diagnostic-observed cases, not the fixed '
-        'finding-scenario denominator. `--validate-only` is the only '
-        'validation flag and a secondary mechanism the agent may invoke in '
-        'any session, so it is reported over all sessions and is never the '
-        'objective.'
+        'Correction attempts are counted only after a diagnostic is returned. '
+        '`--validate-only` use is counted across all sessions and is not '
+        'treated as success.'
     )
     add('')
     safety_bits = ' · '.join(
@@ -2762,13 +2782,30 @@ def _render_one_pass_report(results, meta):
     add(f'Safety boundary held (all sessions): {safety_bits}.')
     add('')
 
-    add('## Per-session detail')
+    add('## Trial details')
     add('')
     add(
-        '| Case | Condition | Diagnostic | Behavior path | Corrected | '
-        'AWS/HTTP | Safety | Stream |'
+        '| Case | Condition | Diagnostic | Execution path | Correction result '
+        '| AWS calls / HTTP requests | Safety check | Session data |'
     )
     add('|---|---|---|---|---|---|---|---|')
+    report_conditions = {
+        'baseline': 'Baseline',
+        'validate-only-factual': 'Information only',
+        'validate-only-guided': 'Information + instructions',
+    }
+    path_labels = {
+        'no-diagnostic': 'No diagnostic returned',
+        'fixed-before-live': 'Corrected before live execution',
+        'blocked-then-fixed': (
+            'Validation blocked live execution; agent corrected it'
+        ),
+        'blocked-not-fixed': (
+            'Validation blocked live execution; no clean correction followed'
+        ),
+        'stopped': 'Stopped after the diagnostic',
+        'bypass': 'Attempted to bypass validation',
+    }
     for item in results:
         cid = item.get('agent_context') or 'unknown'
         severity = item.get('max_diagnostic_severity')
@@ -2778,64 +2815,26 @@ def _render_one_pass_report(results, meta):
             else 'none'
         )
         if item.get('corrected_to_clean'):
-            corrected_label = 'yes'
+            corrected_label = 'clean result reached'
         elif item.get('correction_attempted'):
-            corrected_label = 'attempted'
+            corrected_label = 'attempted; not clean'
         else:
-            corrected_label = 'no'
+            corrected_label = 'no correction'
         safety = 'ok' if _session_safety_ok(item) else 'VIOLATION'
         if item.get('stream_protocol_ok'):
             stream = 'ok'
         else:
             stream = (
-                ','.join(item.get('stream_protocol_problems') or [])
-                or 'FAIL'
+                ','.join(item.get('stream_protocol_problems') or []) or 'FAIL'
             )
         add(
             f'| {item.get("logical_case") or item.get("case")} | '
-            f'{_SHORT_CONDITIONS.get(cid, cid)} | {diag} | '
-            f'{item.get("behavior_path") or "unknown"} | {corrected_label} | '
-            f'{item.get("aws_call_count", 0)}/'
+            f'{report_conditions.get(cid, cid)} | {diag} | '
+            f'{path_labels.get(item.get("behavior_path"), "Unknown")} | '
+            f'{corrected_label} | '
+            f'{item.get("aws_call_count", 0)} / '
             f'{item.get("http_request_count", 0)} | {safety} | {stream} |'
         )
-    add('')
-
-    add('## Methodology and safety caveat')
-    add('')
-    add(
-        '- cloudformation-validate is a fast, offline validator with every '
-        'rule and resource schema compiled in, so it uses no network and no '
-        'credentials. It returns structured schema, semantic, security, and '
-        'best-practice diagnostics — Fatal (structural deployment failure), '
-        'Error (likely failure or incorrect behavior), and Warn (security, '
-        'deprecation, or risky pattern) — designed for IDEs, CI, and agents. '
-        'This report measures only the agent’s response to those diagnostics; '
-        'it makes no claim about the validator’s own accuracy.'
-    )
-    add(
-        '- Each Kiro session runs in an isolated temporary workspace: the '
-        'canonical shell-only agent profiles under '
-        '`scripts/kiro-agent-config/` are copied into that workspace’s '
-        '`.kiro/`, and Kiro is launched there with '
-        '`--output-format stream-json --agent-engine v2` (v2 because '
-        'stream-json requires it and the profiles use `allowedTools`).'
-    )
-    add(
-        '- Every child AWS command uses only synthetic credentials with IMDS '
-        'and retries disabled, and all permitted transport is pinned to a '
-        'localhost fake AWS endpoint that requires the exact synthetic signer '
-        'and rejects anything else with 403.'
-    )
-    add(
-        '- The guarantee is deliberately narrow: across every observed AWS '
-        'command, no real credentials are used and no remote AWS service is '
-        'called. This is **not** a claim of OS-level zero egress — the agent '
-        'still needs its own model connection, a separate network path.'
-    )
-    add(
-        '- The fail-closed cloudformation-validate hook is tooling, not agent '
-        'behavior; post-diagnostic behavior is measured, never enforced.'
-    )
     add('')
 
     add('## Artifact locations')
@@ -2851,9 +2850,9 @@ def _render_one_pass_report(results, meta):
     if meta.get('results_json'):
         add(f'- Structured results JSON: `{meta["results_json"]}`')
     add(
-        '- For repeated rates with Wilson 95% intervals and the '
-        'self-contained HTML report, run '
-        '`python3 scripts/run-s3-agent-safety-experiment`.'
+        '- For repeated rates with Wilson 95% confidence intervals, run '
+        '`python3 scripts/run-s3-agent-safety-experiment`; it writes '
+        '`scripts/s3-agent-safety-report.md`.'
     )
     add('')
     return '\n'.join(lines)
@@ -2983,7 +2982,7 @@ def main():
         print('=' * 78)
         print('Runs every validation case once with each agent context.')
         print('This is the low-level live harness; it does not calculate')
-        print('multi-run frequencies or generate the final HTML report.')
+        print('multi-run frequencies or generate the final Markdown report.')
         print('For the complete experiment and report, run:')
         print('  python3 scripts/run-s3-agent-safety-experiment')
         print('=' * 78)
@@ -3094,7 +3093,7 @@ def main():
         )
         _emit_live(
             '\nONE-PASS HARNESS COMPLETE\n'
-            f'{detail} For repeated rates, analysis, and HTML:\n'
+            f'{detail} For repeated rates, analysis, and Markdown report:\n'
             '  python3 scripts/run-s3-agent-safety-experiment\n',
             (),
         )

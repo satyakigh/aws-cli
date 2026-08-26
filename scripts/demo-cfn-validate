@@ -906,44 +906,66 @@ def _render_report(records, meta):
     )
 
     lines = [
-        '# cloudformation-validate diagnostic stimulus report',
+        '# cloudformation-validate test report',
+        '',
+        '## Summary',
         '',
         (
-            '**Purpose.** This report characterizes the deterministic '
-            '`cloudformation-validate` diagnostic *stimulus* produced by '
-            '`scripts/demo-cfn-validate`. **No agent runs here** — it records '
-            'only what the validator itself emits for a fixed set of AWS '
-            'requests, so the agent-response demos can be read against a known '
-            'stimulus. Every percentage below characterizes this deterministic '
-            'stimulus case mix, **not** AI or agent behavior.'
+            '**Purpose.** Show the validator results used as input to the '
+            'agent behavior demos. **No agent runs in this demo.** It records '
+            'only the diagnostics returned for a fixed set of AWS CLI '
+            'requests.'
         ),
+        '',
+        (
+            f'**Result.** Of {total} cases, '
+            f'{_pct(outcome_counts["CLEAN"], total)} returned a clean result, '
+            f'{_pct(outcome_counts["FINDINGS"], total)} returned one or more '
+            f'diagnostics, and {_pct(outcome_counts["ERROR"], total)} ended '
+            'with an unexpected error.'
+        ),
+        '',
+        f'- Validation ran: {_pct(status_counts["VALIDATED"], total)}',
+        f'- Validation was skipped: {_pct(status_counts["SKIPPED"], total)}',
+        f'- Validation status was unknown: '
+        f'{_pct(status_counts["unknown"], total)}',
+        '',
+        (
+            'These percentages describe this fixed test set. They do not '
+            'measure agent or model behavior.'
+        ),
+        '',
+        '## Methodology',
+        '',
+        (
+            'Every case runs `aws --validate-only ...` in an isolated child '
+            'process. Inherited `AWS_*` variables are removed, no credentials '
+            'are set, instance metadata and retries are disabled, and all '
+            'endpoints point to an unused localhost port. `--validate-only` '
+            'stops before signing or transport, so the demo makes no HTTP '
+            'request and does not need AWS credentials.'
+        ),
+        '',
+        (
+            'The report uses the process exit code for the result and parses '
+            'the validation status and diagnostics from command output:'
+        ),
+        '',
+        '- **CLEAN** — no diagnostics were returned, or validation was skipped.',
+        '- **FINDINGS** — one or more diagnostics were returned.',
+        '- **ERROR** — the command returned an unexpected exit code.',
+        '',
+        (
+            'Diagnostic severity is reported as **FATAL** (cannot deploy as '
+            'written), **ERROR** (likely failure or incorrect behavior), or '
+            '**WARN** (security, deprecation, or risky configuration).'
+        ),
+        '',
+        '## Run details',
         '',
         f'- Generated: {meta.get("generated_at", "unknown")}',
         f'- AWS CLI: `{meta.get("aws_executable", "unknown")}`',
         f'- Cases executed ({total}): {rendered_cases}',
-        '',
-        '## Executive summary',
-        '',
-        (
-            "Outcomes are derived solely from each case's exact process exit "
-            'code; statuses and diagnostics are parsed solely from the '
-            'validator output each run emitted. These percentages '
-            'characterize the fixed, deterministic stimulus case mix '
-            'exercised in this run — they are **not** a measure of any agent '
-            'or AI behavior.'
-        ),
-        '',
-        f'Outcome (by exit code) over {total} case(s):',
-        '',
-        f'- CLEAN: {_pct(outcome_counts["CLEAN"], total)}',
-        f'- FINDINGS: {_pct(outcome_counts["FINDINGS"], total)}',
-        f'- ERROR: {_pct(outcome_counts["ERROR"], total)}',
-        '',
-        f'Status (parsed from validator output) over {total} case(s):',
-        '',
-        f'- VALIDATED: {_pct(status_counts["VALIDATED"], total)}',
-        f'- SKIPPED: {_pct(status_counts["SKIPPED"], total)}',
-        f'- unknown: {_pct(status_counts["unknown"], total)}',
         '',
         '## Diagnostics by severity',
         '',
@@ -988,37 +1010,6 @@ def _render_report(records, meta):
     lines.extend(
         [
             '',
-            '## Severity meanings and method',
-            '',
-            (
-                'Validation runs at the WARN threshold, so only these '
-                'severities surface:'
-            ),
-            '',
-            (
-                '- **FATAL** — a structural deployment failure; the request '
-                'or template cannot deploy as written.'
-            ),
-            (
-                '- **ERROR** — a likely deployment failure or incorrect '
-                'behavior.'
-            ),
-            (
-                '- **WARN** — a security, deprecation, or otherwise '
-                'risky-pattern finding.'
-            ),
-            '',
-            (
-                'Method: every case runs `aws --validate-only ...` in an '
-                'isolated child environment — all inherited `AWS_*` variables '
-                'removed, no credentials set (**credential-free**), IMDS and '
-                'retries disabled, and the global and per-service endpoints '
-                'pinned to an unroutable loopback endpoint. Because '
-                '`--validate-only` always stops before transport (and before '
-                'signing), the run is fully **offline** and makes **no HTTP '
-                'call** to any AWS endpoint.'
-            ),
-            '',
             '## Related generated reports',
             '',
             (
@@ -1027,7 +1018,7 @@ def _render_report(records, meta):
             ),
             '',
             (
-                '- `scripts/cfn-validate-report.md` — this validator-stimulus '
+                '- `scripts/cfn-validate-report.md` — this validator test '
                 'report, written by `scripts/demo-cfn-validate`.'
             ),
             (
@@ -1036,8 +1027,8 @@ def _render_report(records, meta):
                 '`scripts/demo-s3-agent-loop`.'
             ),
             (
-                '- `scripts/s3-agent-safety-report.html` — the '
-                'repeated-trials, self-contained HTML report, written by '
+                '- `scripts/s3-agent-safety-report.md` — the repeated-trial '
+                'Markdown report, written by '
                 '`scripts/run-s3-agent-safety-experiment`.'
             ),
             '',

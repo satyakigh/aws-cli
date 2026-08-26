@@ -1,26 +1,34 @@
-# cloudformation-validate diagnostic stimulus report
+# cloudformation-validate test report
 
-**Purpose.** This report characterizes the deterministic `cloudformation-validate` diagnostic *stimulus* produced by `scripts/demo-cfn-validate`. **No agent runs here** — it records only what the validator itself emits for a fixed set of AWS requests, so the agent-response demos can be read against a known stimulus. Every percentage below characterizes this deterministic stimulus case mix, **not** AI or agent behavior.
+## Summary
 
-- Generated: 2026-08-25T15:56:02.364560-06:00
+**Purpose.** Show the validator results used as input to the agent behavior demos. **No agent runs in this demo.** It records only the diagnostics returned for a fixed set of AWS CLI requests.
+
+**Result.** Of 24 cases, 75% (18/24) returned a clean result, 25% (6/24) returned one or more diagnostics, and 0% (0/24) ended with an unexpected error.
+
+- Validation ran: 50% (12/24)
+- Validation was skipped: 50% (12/24)
+- Validation status was unknown: 0% (0/24)
+
+These percentages describe this fixed test set. They do not measure agent or model behavior.
+
+## Methodology
+
+Every case runs `aws --validate-only ...` in an isolated child process. Inherited `AWS_*` variables are removed, no credentials are set, instance metadata and retries are disabled, and all endpoints point to an unused localhost port. `--validate-only` stops before signing or transport, so the demo makes no HTTP request and does not need AWS credentials.
+
+The report uses the process exit code for the result and parses the validation status and diagnostics from command output:
+
+- **CLEAN** — no diagnostics were returned, or validation was skipped.
+- **FINDINGS** — one or more diagnostics were returned.
+- **ERROR** — the command returned an unexpected exit code.
+
+Diagnostic severity is reported as **FATAL** (cannot deploy as written), **ERROR** (likely failure or incorrect behavior), or **WARN** (security, deprecation, or risky configuration).
+
+## Run details
+
+- Generated: 2026-08-26T13:33:20.366665-06:00
 - AWS CLI: `/Volumes/workplace/external-tools/aws-cli/build/venv/bin/aws`
 - Cases executed (24): `s3-create-valid`, `s3-create-invalid`, `sns-create-topic-valid`, `lambda-update-valid`, `lambda-update-invalid`, `read-only-list-buckets`, `read-only-describe-instances`, `data-plane-lambda-invoke`, `data-plane-sqs-send-message`, `dynamodb-delete-table`, `dynamodb-create-table-nested`, `ec2-create-sg-unmapped`, `cfn-create-stack-valid-body`, `cfn-create-stack-invalid-body`, `cloudcontrol-create-valid`, `cloudcontrol-create-invalid`, `cloudcontrol-unknown-type`, `cloudcontrol-update-patch`, `s3-create-acl-public-read`, `s3-create-grant-read-public`, `s3-put-bucket-policy-unmapped`, `cfn-s3-access-control-no-ownership`, `cfn-s3-access-control-with-ownership`, `cfn-s3-secure-public-access-block`
-
-## Executive summary
-
-Outcomes are derived solely from each case's exact process exit code; statuses and diagnostics are parsed solely from the validator output each run emitted. These percentages characterize the fixed, deterministic stimulus case mix exercised in this run — they are **not** a measure of any agent or AI behavior.
-
-Outcome (by exit code) over 24 case(s):
-
-- CLEAN: 75% (18/24)
-- FINDINGS: 25% (6/24)
-- ERROR: 0% (0/24)
-
-Status (parsed from validator output) over 24 case(s):
-
-- VALIDATED: 50% (12/24)
-- SKIPPED: 50% (12/24)
-- unknown: 0% (0/24)
 
 ## Diagnostics by severity
 
@@ -61,21 +69,11 @@ Across 24 case(s), 7 diagnostic(s) were parsed. **Cases** counts the cases with 
 | cfn-s3-access-control-with-ownership | CloudFormation CreateStack with S3 AccessControl and OwnershipControls ObjectWriter — one finding | `aws --validate-only --region us-east-1 --endpoint-url http://127.0.0.1:1 cloudformation create-stack --stack-name access-control-ownership-stack --template-body '{"AWSTemplateFormatVersion": "2010-09-09", "Resources": {"Bucket": {"Type": "AWS::S3::Bucket", "Properties": {"AccessControl": "PublicRead", "OwnershipControls": {"Rules": [{"ObjectOwnership": "ObjectWriter"}]}}}}}'` | CLOUD_FORMATION_CREATE | VALIDATED | 1 (1 WARN) | FINDINGS | 252 |
 | cfn-s3-secure-public-access-block | CloudFormation CreateStack with secure S3 Bucket PublicAccessBlockConfiguration and scoped BucketPolicy — zero findings | `aws --validate-only --region us-east-1 --endpoint-url http://127.0.0.1:1 cloudformation create-stack --stack-name secure-bucket-stack --template-body '{"AWSTemplateFormatVersion": "2010-09-09", "Resources": {"SecureBucket": {"Type": "AWS::S3::Bucket", "Properties": {"BucketName": "secure-demo-bucket-2024", "PublicAccessBlockConfiguration": {"BlockPublicAcls": true, "BlockPublicPolicy": true, "IgnorePublicAcls": true, "RestrictPublicBuckets": true}}}, "BucketPolicy": {"Type": "AWS::S3::BucketPolicy", "Properties": {"Bucket": {"Ref": "SecureBucket"}, "PolicyDocument": {"Version": "2012-10-17", "Statement": [{"Sid": "AllowAccountGet", "Effect": "Allow", "Principal": {"AWS": {"Fn::Sub": "arn:aws:iam::${AWS::AccountId}:root"}}, "Action": "s3:GetObject", "Resource": {"Fn::Sub": "arn:aws:s3:::${SecureBucket}/*"}}]}}}}}'` | CLOUD_FORMATION_CREATE | VALIDATED | none | CLEAN | 0 |
 
-## Severity meanings and method
-
-Validation runs at the WARN threshold, so only these severities surface:
-
-- **FATAL** — a structural deployment failure; the request or template cannot deploy as written.
-- **ERROR** — a likely deployment failure or incorrect behavior.
-- **WARN** — a security, deprecation, or otherwise risky-pattern finding.
-
-Method: every case runs `aws --validate-only ...` in an isolated child environment — all inherited `AWS_*` variables removed, no credentials set (**credential-free**), IMDS and retries disabled, and the global and per-service endpoints pinned to an unroutable loopback endpoint. Because `--validate-only` always stops before transport (and before signing), the run is fully **offline** and makes **no HTTP call** to any AWS endpoint.
-
 ## Related generated reports
 
 Each of the three reports is generated only by running its demo; none is hand-authored:
 
-- `scripts/cfn-validate-report.md` — this validator-stimulus report, written by `scripts/demo-cfn-validate`.
+- `scripts/cfn-validate-report.md` — this validator test report, written by `scripts/demo-cfn-validate`.
 - `scripts/s3-agent-loop-report.md` — the one-pass agent-behavior Markdown report, written by `scripts/demo-s3-agent-loop`.
-- `scripts/s3-agent-safety-report.html` — the repeated-trials, self-contained HTML report, written by `scripts/run-s3-agent-safety-experiment`.
+- `scripts/s3-agent-safety-report.md` — the repeated-trial Markdown report, written by `scripts/run-s3-agent-safety-experiment`.
 

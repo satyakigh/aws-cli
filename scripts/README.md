@@ -17,8 +17,7 @@ Three scripts sit on top of that hook, each with a distinct job:
   compact line per session; `--verbose` restores the full live output and
   detailed final table. It always writes a concrete one-pass Markdown report.
 * `scripts/run-s3-agent-safety-experiment` — **repeats** the one-pass harness
-  many times, aggregates the trials, and renders a compact, self-contained
-  HTML report.
+  many times, aggregates the trials, and renders a compact Markdown report.
 
 The agent-response demos study how the agent behaves **after** a diagnostic:
 whether it revises the request and reaches a clean validation or success, and
@@ -54,7 +53,7 @@ integrated AWS CLI v2  ──►  cfnvalidate hook  ──►  RegoEngine (in pr
                                                         exits before transport — no HTTP
 
 
-scripts/run-s3-agent-safety-experiment  (default 54 sessions; HTML report)
+scripts/run-s3-agent-safety-experiment  (default 54 sessions; Markdown report)
     │  repeats N times and aggregates trials.json + manifest.json
     ▼
 scripts/demo-s3-agent-loop  (one pass: 3 conditions × 6 cases)
@@ -128,16 +127,15 @@ results. For each case the demo captures the child's stdout and stderr,
 replays them to the matching live console streams, and records the
 classification, the `VALIDATED`/`SKIPPED`/`unknown` status, the parsed
 diagnostics and their severities, the `CLEAN`/`FINDINGS`/`ERROR` outcome, and
-the exact exit code. The report states its no-agent purpose and run
-timestamp, lists the exact selected cases, and presents executive percentages
-(each with its `k/N`) for the CLEAN/FINDINGS/ERROR and VALIDATED/SKIPPED/
-unknown distributions, per-severity case and diagnostic counts, a per-case
-table, the severity meanings, the offline/credential-free/no-HTTP method, and
-the names of the other two generated reports. Those percentages characterize
-this deterministic stimulus case mix, **not** AI behavior. The report is
-written even when a case has an unexpected ERROR outcome (the script still
-exits nonzero in that case). It is generated only by running this demo; it is
-never hand-authored.
+the exact exit code. The report starts with its no-agent purpose and the
+CLEAN/FINDINGS/ERROR result percentages, followed immediately by a short
+Methodology section that explains the local, credential-free, no-HTTP test
+setup and the result and severity definitions. Run details, severity counts,
+and one row per case follow. It also names the other two generated reports.
+The percentages describe this fixed validator test set, **not** agent or model
+behavior. The report is written even when a case has an unexpected ERROR
+outcome (the script still exits nonzero in that case). It is generated only by
+running this demo; it is never hand-authored.
 
 ## `scripts/demo-s3-agent-loop` — one pass of agent behavior
 
@@ -229,34 +227,29 @@ one-pass table. Regardless of verbosity, each session always writes two
 per-session artifacts: a **human-readable `.txt` transcript** (the primary
 human evidence — rendered from the stream-json events, with each shell command
 preserved so the bypass/investigation analysis still applies) and a
-supplementary **raw `.jsonl`** stream of the exact ACP events (engineering
-evidence). It **always writes a concrete one-pass Markdown report** —
-`--report PATH`, default `scripts/s3-agent-loop-report.md`. The report leads
-with the primary experiment question and defines the three conditions
-(baseline, validate-only factual, validate-only guided) in plain language,
-then **centers percentage-based finding-response comparisons**: every
-finding-response outcome (diagnostic observed, self-corrected to clean, fixed
-before live, hook-blocked-then-fixed, hook-blocked-not-fixed, stopped, and
-attempted bypass) is shown per condition as a percentage with its `k/N`
-fraction over a **fixed finding-scenario denominator** — the cases assigned a
-real risk, counted whether or not a diagnostic actually surfaced. Correction
-attempted is reported over the diagnostic-observed cases it is conditional on,
-and `--validate-only` usage over all sessions, so both are labeled
-clearly-secondary measures with their own denominators. These one-pass
-percentages are **descriptive** — one observation per case and condition —
-while the repeated HTML report adds Wilson 95% confidence intervals. Alongside
-the comparison the report carries an executive summary with percentages and
-the boundary verdict, per-session detail, the methodology/safety caveat, and
-artifact locations, so a manager or an engineer can read one file without
-post-processing. The structured results
-record (`--results-json`) also stores each session's human-transcript SHA and
-raw-event SHA and path. Under the experiment runner it prints only the compact
-per-session lines and writes a per-repetition report; the runner renders the
-aggregate condition table and the HTML report. It does **not** compute
-repeated frequencies or generate the HTML report itself — use the experiment
-runner for that.
+supplementary **raw `.jsonl`** stream of the exact stream-json events
+(engineering evidence). It **always writes a concrete one-pass Markdown
+report** — `--report PATH`, default `scripts/s3-agent-loop-report.md`. The
+report starts with the question and primary result, the per-condition
+correction breakdown, the safety status, and the run scope. A short
+Methodology section follows immediately and lists the shared agent task and
+permissions plus the exact validation information or correction instructions
+provided to each profile. Run details follow with the generated timestamp,
+run identifier, local endpoint, and selected cases. Results by condition then
+show percentages with their counts and totals; all issue-producing cases stay
+in the total even when no diagnostic is returned. Correction attempts are
+counted only for cases that returned a diagnostic, and `--validate-only` use
+is reported separately across all sessions because it is not a success
+measure. The report ends with one row per session and artifact locations.
+One-pass percentages
+describe one observation per case and condition; the repeated Markdown report
+adds Wilson 95% confidence intervals. The structured results record
+(`--results-json`) also stores each session's transcript and raw-event hashes
+and paths. Under the experiment runner, the harness prints compact session
+lines and writes a per-repetition Markdown report. The runner, not this
+one-pass harness, computes repeated rates and writes the aggregate report.
 
-## `scripts/run-s3-agent-safety-experiment` — repeated trials + HTML report
+## `scripts/run-s3-agent-safety-experiment` — repeated trials + Markdown report
 
 This is the main command most people should run:
 
@@ -265,8 +258,7 @@ python3 scripts/run-s3-agent-safety-experiment
 ```
 
 **Purpose.** Repeat the one-pass harness enough times to report rates with
-confidence intervals, aggregate the trials, and render the self-contained
-HTML report.
+confidence intervals, aggregate the trials, and render the Markdown report.
 
 **What it does.**
 
@@ -280,32 +272,24 @@ HTML report.
 5. Relays concise per-session progress by default; the full cleaned Kiro
    output for each session goes to per-session transcripts, not the console.
    `--verbose` streams the full Kiro output and is forwarded to the harness.
-6. Prints a compact summary by default: a small one-row-per-condition table
-   (finding-scenario N, diagnostic observed, corrected-to-clean,
-   fixed-before-live, hook-blocked-then-fixed, hook-blocked-not-fixed, hook
-   load-bearing, and exact `--validate-only` use, each as k/N with no CI),
-   one compact safety status that reports every high-impact integrity signal
-   and a single boundary-held verdict (PASS only when all are clear), and the
-   artifact locations. `--verbose` prints the full per-condition breakdown
-   (every mutually-exclusive outcome, the exclusive behavior path, the
-   independent-events breakdown with the **hook-load-bearing** metric, and
-   the correction attempts & efficiency breakdown), each over a fixed
-   finding-scenario denominator.
-7. Writes the aggregated dataset to `scripts/s3-agent-safety-data/` and a
-   compact, self-contained HTML report to
-   `scripts/s3-agent-safety-report.html` — an executive-summary-first report
-   that **centers the same percentage-based finding-response comparisons**
-   across the three conditions — each finding-response outcome as a percentage
-   (k/N) over the fixed finding-scenario denominator, now with **Wilson 95%
-   confidence intervals** — reports correction-attempted and `--validate-only`
-   usage as clearly-secondary measures over their own denominators, and keeps
-   a compact per-case view and a one-row-per-trial evidence table. Each
-   repetition also drives
-   the harness with a per-repetition Markdown report path
-   (`scripts/s3-agent-safety-data/raw/rep-NN-report.md`). Full transcripts,
-   ordered command traces, prompts, and the complete trials.json stay in the
-   data directory, not the HTML.
-8. Prints the exact Python command for opening the report.
+6. Prints a compact summary by default: one row per condition with the number
+   of issue-producing tests, diagnostics returned, clean corrections,
+   corrections before live execution, corrections after validation blocked a
+   live request, and `--validate-only` use. It also prints the overall safety
+   status and artifact locations. `--verbose` adds all recorded outcomes,
+   execution paths, correction attempts, and timing data.
+7. Writes the aggregated dataset to `scripts/s3-agent-safety-data/` and the
+   Markdown report to `scripts/s3-agent-safety-report.md`. The report starts
+   with the result, interpretation, safety status, and test size, followed by
+   a concise Methodology section that names every agent profile and its exact
+   information or instructions. It then shows results by condition, safety
+   checks, results by case, one row per trial, limitations, and evidence
+   locations. Every rate includes its count, total, and Wilson 95% confidence
+   interval. Each repetition also writes a one-pass Markdown report under
+   `scripts/s3-agent-safety-data/raw/rep-NN-report.md`. Full transcripts,
+   command traces, prompts, and `trials.json` stay in the data directory
+   rather than being copied into the report.
+8. Prints the report path and a `less` command for reading it.
 
 The sessions run sequentially, so this command can take several minutes.
 
@@ -315,7 +299,7 @@ The sessions run sequentially, so this command can take several minutes.
 python3 scripts/run-s3-agent-safety-experiment --from-data
 ```
 
-This re-renders the HTML report from an existing
+This re-renders the Markdown report from an existing
 `scripts/s3-agent-safety-data/trials.json` **without running any sessions**
 (no Kiro, no subprocess). Only the current schema (v4: three conditions,
 `--validate-only` only) is supported. A dataset from an earlier schema
@@ -324,10 +308,10 @@ rejected with a clear unsupported-schema error rather than rendered — the
 generated data is disposable and rerunnable, so regenerate it by running the
 experiment without `--from-data`.
 
-To open an already-generated report without rerunning anything:
+To read an already-generated report without rerunning anything:
 
 ```text
-python3 -c "import pathlib, webbrowser; webbrowser.open(pathlib.Path('scripts/s3-agent-safety-report.html').resolve().as_uri())"
+less scripts/s3-agent-safety-report.md
 ```
 
 ### Default cases
@@ -556,23 +540,22 @@ never transports.
 Three reports live under `scripts/`, and **each is generated only by running
 its demo** — none is hand-authored or checked in from a prior run:
 
-* `scripts/cfn-validate-report.md` — the validator-stimulus report, written
+* `scripts/cfn-validate-report.md` — the validator test report, written
   by `scripts/demo-cfn-validate` (see that section above). Built solely from
   the run's observed subprocess results.
 * `scripts/s3-agent-loop-report.md` — the one-pass agent-behavior Markdown
   report, written by a standalone `scripts/demo-s3-agent-loop` run.
-* `scripts/s3-agent-safety-report.html` — the repeated-trials, self-contained
-  HTML report, written by `scripts/run-s3-agent-safety-experiment`.
+* `scripts/s3-agent-safety-report.md` — the repeated-trial Markdown report,
+  written by `scripts/run-s3-agent-safety-experiment`.
 
 The main experiment (`run-s3-agent-safety-experiment`) produces:
 
-* `scripts/s3-agent-safety-report.html` — the compact,
-  executive-summary-first report to read. It leads with the headline and a
-  safety summary, consolidates the per-condition metrics into one comparison
-  view, and keeps a compact per-case view and a one-row-per-trial evidence
-  table. It does **not** embed full transcripts, ordered command traces,
-  prompts, or the complete trials.json — those stay in the data directory
-  below, and the report's Evidence files section points to them.
+* `scripts/s3-agent-safety-report.md` — the aggregate report to read first. It
+  starts with the result, interpretation, safety status, and test size. The
+  next section explains the shared agent role and the information or
+  instructions supplied to each condition. Later sections provide condition,
+  safety, case, and trial details. Full transcripts, command traces, prompts,
+  and `trials.json` remain in the data directory; the report links to them.
 * `scripts/s3-agent-safety-data/` — the full audit trail: `trials.json`,
   `manifest.json` (with the agent-profile restoration count and the SHA256 of
   the harness and all three agent profiles), per-session transcripts (a
@@ -584,9 +567,9 @@ The main experiment (`run-s3-agent-safety-experiment`) produces:
   written by a standalone `demo-s3-agent-loop` run.
 
 **Reports vs. raw evidence, and what is tracked.** The generated reports are
-intentionally **not** gitignored and may be committed: the validator-stimulus
-Markdown report (`scripts/cfn-validate-report.md`), the self-contained HTML
-report (`scripts/s3-agent-safety-report.html`), and the one-pass Markdown
+intentionally **not** gitignored and may be committed: the validator test
+Markdown report (`scripts/cfn-validate-report.md`), the repeated-trial Markdown
+report (`scripts/s3-agent-safety-report.md`), and the one-pass Markdown
 report (`scripts/s3-agent-loop-report.md`). Each is regenerated from scratch
 by running its demo. The disposable raw evidence **is**
 gitignored: the human-readable `.txt` transcripts and their supplementary
@@ -602,7 +585,7 @@ than rendered.
 
 ## Which command should I use?
 
-* To get the complete results and HTML:
+* To get the complete results and Markdown report:
   `python3 scripts/run-s3-agent-safety-experiment`
 * To inspect one pass of agent behavior: `python3 scripts/demo-s3-agent-loop`
 * To see the validator diagnostics alone: `python3 scripts/demo-cfn-validate`
