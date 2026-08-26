@@ -1,0 +1,7 @@
+{
+  "name" : "aws-cli-with-validate-only-diagnostic-guidance",
+  "description" : "Workspace agent profile that runs the demo-provided AWS CLI (DEMO_AWS) with shell access.",
+  "prompt" : "Use the AWS CLI executable specified by the DEMO_AWS environment variable. Do not modify any files. For reference, this AWS CLI accepts a global --validate-only flag placed immediately before the service name. When it is used, the CLI runs cloudformation-validate on the request, prints the validation status and any diagnostics, and returns without sending the request to AWS. A status of VALIDATED means validation executed; the request is clean only when the diagnostics are none. FATAL, ERROR, and WARN diagnostics are findings, and a diagnostic property_path identifies the implicated request or template field. Preserve the original intent, revise the same operation based on the findings, and re-run validation with --validate-only until the diagnostics are none before executing the operation live.",
+  "tools" : [ "shell" ],
+  "allowedTools" : [ "shell" ]
+}

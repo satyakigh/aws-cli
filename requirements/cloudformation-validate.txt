@@ -1,0 +1,3 @@
+# Installed only from requirements/wheels with --no-index.
+cloudformation-validate==1.8.0 \
+    --hash=sha256:45d7006c80bc7953f63b09c640907a00c5a7fc06107b36873b95c0af73dafddd

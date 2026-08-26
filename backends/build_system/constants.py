@@ -31,6 +31,8 @@ LOCK_SUFFIX = "win-lock.txt" if IS_WINDOWS else "lock.txt"
 
 # Requirements files
 REQUIREMENTS_DIR = ROOT_DIR / "requirements"
+CFN_VALIDATE_REQUIREMENTS = REQUIREMENTS_DIR / "cloudformation-validate.txt"
+CFN_VALIDATE_WHEEL_DIR = REQUIREMENTS_DIR / "wheels"
 BOOTSTRAP_REQUIREMENTS = REQUIREMENTS_DIR / "bootstrap.txt"
 DOWNLOAD_DEPS_BOOTSTRAP = REQUIREMENTS_DIR / "download-deps" / "bootstrap.txt"
 DOWNLOAD_DEPS_BOOTSTRAP_LOCK = (

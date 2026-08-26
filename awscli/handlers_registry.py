@@ -109,6 +109,9 @@ PLUGIN_REGISTRY = {
             'register_generate_cli_skeleton',
         ),
     ],
+    'building-top-level-params': [
+        ('awscli.customizations.cfnvalidate', 'register_cfn_validate'),
+    ],
     'building-argument-table.*': [
         (
             'awscli.customizations.streamingoutputarg',
