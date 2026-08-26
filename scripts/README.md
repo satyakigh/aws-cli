@@ -10,11 +10,12 @@ Three scripts sit on top of that hook, each with a distinct job:
 
 * `scripts/demo-cfn-validate` — shows the validator **stimulus** alone (no
   agent): which requests are validated or skipped, every `FATAL`, `ERROR`,
-  and `WARN` diagnostic, and the CLEAN/FINDINGS outcome.
+  and `WARN` diagnostic, and the CLEAN/FINDINGS outcome. It always writes a
+  concrete Markdown report generated from that run's observed results.
 * `scripts/demo-s3-agent-loop` — runs **one pass** of a Kiro agent against
   that stimulus under exactly three conditions. By default it prints one
   compact line per session; `--verbose` restores the full live output and
-  detailed final table.
+  detailed final table. It always writes a concrete one-pass Markdown report.
 * `scripts/run-s3-agent-safety-experiment` — **repeats** the one-pass harness
   many times, aggregates the trials, and renders a compact, self-contained
   HTML report.
@@ -59,14 +60,15 @@ scripts/run-s3-agent-safety-experiment  (default 54 sessions; HTML report)
 scripts/demo-s3-agent-loop  (one pass: 3 conditions × 6 cases)
     │  per session launches:
     ▼
-Kiro CLI  (shell-only agent profile)     ← needs its own model connection
+Kiro CLI  (shell-only profile, isolated temp workspace, AWS-free env, stream-json v2)
+    │  ← needs its own model connection; runs with NO AWS_* and no fake-endpoint override
     │  agent runs:  $DEMO_AWS <service> <op> ...      (NOT an AWS data path)
     ▼
 demo proxy  ($DEMO_AWS, an `aws` wrapper on PATH)
     │  enforces http/127.0.0.1/<port>; rejects --profile and any other
     │  endpoint; allows only s3api create-bucket / cloudformation create-stack
     ▼
-integrated AWS CLI v2  ($DEMO_REAL_AWS)
+integrated AWS CLI v2  ($DEMO_REAL_AWS; synthetic signer + localhost endpoint, proxy-scoped)
     ├─ with --validate-only → cfnvalidate hook → CLEAN/FINDINGS, no HTTP
     └─ otherwise            → signed HTTP request to ↓
     ▼
@@ -102,6 +104,10 @@ never contacted; the demo is fully **local, offline, and credential-free**.
 * `--aws PATH` — use a specific integrated AWS CLI v2 executable (defaults to
   this checkout's portable-exe and system-sandbox build outputs).
 * `--case NAME` — run only one of the 24 cases (otherwise all run in order).
+* `--report PATH` — write the Markdown run report to this path (default:
+  `scripts/cfn-validate-report.md`). Relative paths resolve against the
+  repository root. A report is always written from that run's observed
+  results.
 
 **Output and exit behavior.** For each case the demo streams the validator
 block — classification, status, detected resources, the modeled template, and
@@ -115,6 +121,23 @@ Any other, unexpected exit code — including the CLI's reserved client-error
 `254` — is reported as `ERROR` and makes the demo itself exit nonzero after
 every case has run; when each case is CLEAN or FINDINGS the demo exits `0`.
 Use this script to inspect the validator independently of any agent behavior.
+
+**Report.** Every run also writes a Markdown report (`--report`, default
+`scripts/cfn-validate-report.md`) built **solely** from that run's observed
+results. For each case the demo captures the child's stdout and stderr,
+replays them to the matching live console streams, and records the
+classification, the `VALIDATED`/`SKIPPED`/`unknown` status, the parsed
+diagnostics and their severities, the `CLEAN`/`FINDINGS`/`ERROR` outcome, and
+the exact exit code. The report states its no-agent purpose and run
+timestamp, lists the exact selected cases, and presents executive percentages
+(each with its `k/N`) for the CLEAN/FINDINGS/ERROR and VALIDATED/SKIPPED/
+unknown distributions, per-severity case and diagnostic counts, a per-case
+table, the severity meanings, the offline/credential-free/no-HTTP method, and
+the names of the other two generated reports. Those percentages characterize
+this deterministic stimulus case mix, **not** AI behavior. The report is
+written even when a case has an unexpected ERROR outcome (the script still
+exits nonzero in that case). It is generated only by running this demo; it is
+never hand-authored.
 
 ## `scripts/demo-s3-agent-loop` — one pass of agent behavior
 
@@ -130,47 +153,108 @@ final table). This is the lower-level harness that the report experiment
 repeats; use it to debug individual agent behavior.
 
 **Exactly three profiles / conditions.** Before it resolves or launches
-Kiro, the harness loads the three shell-only workspace agent profiles
-(baseline, validate-only factual, validate-only guided) from `.kiro/agents/`
-and fails closed unless every one is shell-only (`tools` and `allowedTools`
-exactly `["shell"]`, and no MCP servers, powers, resources, hooks, or
-`includePowers`). This direct preflight mirrors the experiment runner's
-complementary preflight, so both enforce one rule set.
+Kiro, the harness loads the three shell-only agent profiles (baseline,
+validate-only factual, validate-only guided) from the canonical config
+directory `scripts/kiro-agent-config/agents/` — deliberately **outside**
+Kiro's auto-discovered root `.kiro/` so no demo profile is ever auto-loaded
+into an ambient Kiro session — and fails closed unless every one is shell-only
+(`tools` and `allowedTools` exactly `["shell"]`, and no MCP servers, powers,
+resources, hooks, or `includePowers`). This direct preflight mirrors the
+experiment runner's complementary preflight, so both enforce one rule set.
 
 **Subprocess / proxy / fake-server flow.** For every session the harness:
 
-1. Builds an isolated child environment: all inherited `AWS_*` variables are
-   dropped and replaced with an exact synthetic set (fixed synthetic
-   credentials, IMDS disabled, retries disabled, empty private
-   config/credentials files), and the global and per-service endpoint
-   overrides are pinned to a generated `http://127.0.0.1:<port>` fake AWS
-   endpoint.
-2. Puts a demo proxy (`$DEMO_AWS`, an `aws` wrapper) first on `PATH`. The
+1. Builds the Kiro child environment **AWS-free**: every inherited `AWS_*`
+   variable is dropped and none is re-added, and the outer credential agent
+   (`AIM_CREDS_AGENT_URL`) is removed as well, so Kiro's own SDK traffic can
+   never be signed with ambient credentials or redirected into the fake
+   endpoint. The synthetic AWS identity (fixed synthetic credentials, IMDS
+   disabled, retries disabled, empty private config/credentials files) and the
+   global and per-service endpoint overrides pinned to a generated
+   `http://127.0.0.1:<port>` fake AWS endpoint are **not** set on Kiro itself;
+   they are applied only to the real integrated AWS CLI child launched inside
+   the demo proxy (step 3). The empty private config/credentials files are
+   created here and handed to the proxy through the demo-namespaced,
+   non-`AWS_` variables `DEMO_AWS_CONFIG_FILE` / `DEMO_AWS_CREDENTIALS_FILE`,
+   which therefore survive that child's `AWS_*` strip without ever configuring
+   Kiro.
+2. Creates a **throwaway temporary Kiro workspace** and copies the complete
+   canonical config tree (`scripts/kiro-agent-config/`) into that workspace's
+   `.kiro/` (files are copied, never symlinked). The real repository root is
+   passed through as `DEMO_REPO_ROOT`. Because Kiro is launched with the temp
+   directory as its working directory, the child sees only the validated
+   shell-only profiles and can neither auto-discover nor mutate the
+   repository's own configuration.
+3. Puts a demo proxy (`$DEMO_AWS`, an `aws` wrapper) first on `PATH`. The
    agent profile instructs the agent to call `$DEMO_AWS`. The proxy enforces
    the exact `http`/`127.0.0.1`/port, rejects `--profile` and any differing
    endpoint override, permits only `s3api create-bucket` and
    `cloudformation create-stack`, records each call, then forwards to the
-   integrated AWS CLI (`$DEMO_REAL_AWS`).
-3. Launches the Kiro CLI as a subprocess with the selected agent profile and
-   captures the transcript. A `--validate-only` call is validated in process
-   and never transports; any live call is a signed request to the fake
-   endpoint, which rejects any unsigned or non-synthetic request with 403 and
-   requires the exact synthetic signer.
-4. Snapshots and restores the exact startup **bytes** of all three agent
-   profiles around every session (never using git), so a session that edits a
-   profile cannot contaminate the next one.
+   integrated AWS CLI (`$DEMO_REAL_AWS`) in a freshly constructed child
+   environment — the **only** place the synthetic AWS identity and the
+   localhost endpoint overrides are ever set. That child env is built by
+   stripping any `AWS_*` from the proxy's own environment and applying the
+   exact synthetic set plus the `DEMO_AWS_*` config/credentials paths, so no
+   ambient AWS variable can leak into the real AWS CLI.
+4. Launches the Kiro CLI as a subprocess with the selected agent profile,
+   explicitly requesting `--output-format stream-json --agent-engine v2`. The
+   engine is v2 on purpose: stream-json requires the v2/v3 engine and these
+   profiles use `allowedTools`, which the KAS/v3 path does not document as
+   supported. stdout (the JSON Lines stream) and stderr (warnings, such as the
+   duplicate global-agent notice) are captured on **separate** pipes so a
+   warning can never corrupt JSON parsing. Every event is rendered into a
+   human-readable `.txt` transcript (with shell tool calls rendered so the
+   bypass/investigation analysis still recovers each command) and the complete
+   raw stream is also written verbatim to a per-session `.jsonl` artifact. A
+   `--validate-only` call is validated in process and never transports; any
+   live call is a signed request to the fake endpoint, which rejects any
+   unsigned or non-synthetic request with 403 and requires the exact synthetic
+   signer.
+5. Snapshots and restores the exact startup **bytes** of all three canonical
+   agent profiles (`scripts/kiro-agent-config/agents/`) around every session
+   (never using git), so a session that edits a profile cannot contaminate the
+   next one.
+
+A malformed JSON line, a wrong or missing engine, or a missing/unsuccessful
+run envelope is treated as a stream-protocol failure and folded into
+`infrastructure_ok` (partial evidence is retained on timeout); an
+unknown-but-valid event type stays visible and is never itself a failure.
 
 **Output and evidence.** By default it prints one compact, pipe-separated
 line per session — condition, case, diagnostic severity (or none), behavior
 path, correction state, AWS-call and HTTP counts, safety status, and elapsed
 time. `--verbose` additionally streams the full Kiro output, reconstructed AWS
 command trace, and per-session behavior block, then prints the detailed
-one-pass table. Regardless of verbosity, the **complete cleaned Kiro stream is
-always written to each per-case transcript** and full structured evidence to
-the results record. Under the experiment runner it prints only the compact
-per-session lines; the runner renders the aggregate condition table. It does
-**not** compute repeated frequencies or generate the HTML report — use the
-experiment runner for that.
+one-pass table. Regardless of verbosity, each session always writes two
+per-session artifacts: a **human-readable `.txt` transcript** (the primary
+human evidence — rendered from the stream-json events, with each shell command
+preserved so the bypass/investigation analysis still applies) and a
+supplementary **raw `.jsonl`** stream of the exact ACP events (engineering
+evidence). It **always writes a concrete one-pass Markdown report** —
+`--report PATH`, default `scripts/s3-agent-loop-report.md`. The report leads
+with the primary experiment question and defines the three conditions
+(baseline, validate-only factual, validate-only guided) in plain language,
+then **centers percentage-based finding-response comparisons**: every
+finding-response outcome (diagnostic observed, self-corrected to clean, fixed
+before live, hook-blocked-then-fixed, hook-blocked-not-fixed, stopped, and
+attempted bypass) is shown per condition as a percentage with its `k/N`
+fraction over a **fixed finding-scenario denominator** — the cases assigned a
+real risk, counted whether or not a diagnostic actually surfaced. Correction
+attempted is reported over the diagnostic-observed cases it is conditional on,
+and `--validate-only` usage over all sessions, so both are labeled
+clearly-secondary measures with their own denominators. These one-pass
+percentages are **descriptive** — one observation per case and condition —
+while the repeated HTML report adds Wilson 95% confidence intervals. Alongside
+the comparison the report carries an executive summary with percentages and
+the boundary verdict, per-session detail, the methodology/safety caveat, and
+artifact locations, so a manager or an engineer can read one file without
+post-processing. The structured results
+record (`--results-json`) also stores each session's human-transcript SHA and
+raw-event SHA and path. Under the experiment runner it prints only the compact
+per-session lines and writes a per-repetition report; the runner renders the
+aggregate condition table and the HTML report. It does **not** compute
+repeated frequencies or generate the HTML report itself — use the experiment
+runner for that.
 
 ## `scripts/run-s3-agent-safety-experiment` — repeated trials + HTML report
 
@@ -210,10 +294,17 @@ HTML report.
 7. Writes the aggregated dataset to `scripts/s3-agent-safety-data/` and a
    compact, self-contained HTML report to
    `scripts/s3-agent-safety-report.html` — an executive-summary-first report
-   that consolidates the per-condition metrics and keeps a compact per-case
-   view and a one-row-per-trial evidence table. Full transcripts, ordered
-   command traces, prompts, and the complete trials.json stay in the data
-   directory, not the HTML.
+   that **centers the same percentage-based finding-response comparisons**
+   across the three conditions — each finding-response outcome as a percentage
+   (k/N) over the fixed finding-scenario denominator, now with **Wilson 95%
+   confidence intervals** — reports correction-attempted and `--validate-only`
+   usage as clearly-secondary measures over their own denominators, and keeps
+   a compact per-case view and a one-row-per-trial evidence table. Each
+   repetition also drives
+   the harness with a per-repetition Markdown report path
+   (`scripts/s3-agent-safety-data/raw/rep-NN-report.md`). Full transcripts,
+   ordered command traces, prompts, and the complete trials.json stay in the
+   data directory, not the HTML.
 8. Prints the exact Python command for opening the report.
 
 The sessions run sequentially, so this command can take several minutes.
@@ -447,7 +538,10 @@ behavior.
 * Python 3.9 or newer.
 * Kiro CLI installed and authenticated for the two agent-based commands
   (`demo-s3-agent-loop` and `run-s3-agent-safety-experiment`).
-* Run from an AWS CLI source checkout containing `.kiro/agents/`.
+* Run from an AWS CLI source checkout containing
+  `scripts/kiro-agent-config/` (the canonical agent profiles and workspace
+  settings). The auto-discovered root `.kiro/` is ignored local runtime state
+  and is not required.
 
 The scripts automatically discover or build the integrated AWS CLI. The two
 agent demos run every child AWS command with synthetic credentials, disable
@@ -459,7 +553,18 @@ never transports.
 
 ## Generated results
 
-The main experiment produces:
+Three reports live under `scripts/`, and **each is generated only by running
+its demo** — none is hand-authored or checked in from a prior run:
+
+* `scripts/cfn-validate-report.md` — the validator-stimulus report, written
+  by `scripts/demo-cfn-validate` (see that section above). Built solely from
+  the run's observed subprocess results.
+* `scripts/s3-agent-loop-report.md` — the one-pass agent-behavior Markdown
+  report, written by a standalone `scripts/demo-s3-agent-loop` run.
+* `scripts/s3-agent-safety-report.html` — the repeated-trials, self-contained
+  HTML report, written by `scripts/run-s3-agent-safety-experiment`.
+
+The main experiment (`run-s3-agent-safety-experiment`) produces:
 
 * `scripts/s3-agent-safety-report.html` — the compact,
   executive-summary-first report to read. It leads with the headline and a
@@ -470,19 +575,30 @@ The main experiment produces:
   below, and the report's Evidence files section points to them.
 * `scripts/s3-agent-safety-data/` — the full audit trail: `trials.json`,
   `manifest.json` (with the agent-profile restoration count and the SHA256 of
-  the harness and all three agent profiles), per-session transcripts, raw
-  per-repetition results, and logs.
+  the harness and all three agent profiles), per-session transcripts (a
+  human-readable `.txt` and a supplementary raw `.jsonl` each), per-repetition
+  results and one-pass Markdown reports under `raw/`, and logs.
 * `scripts/*-<condition>.txt` — convenience copies of the latest one-pass
-  transcripts.
+  transcripts, each with a matching `.jsonl` raw event stream.
+* `scripts/s3-agent-loop-report.md` — the concrete one-pass Markdown report
+  written by a standalone `demo-s3-agent-loop` run.
 
-Generated data and transcript intermediates are gitignored and disposable.
-The compact terminal summary and HTML report carry the results and analysis;
-the complete evidence (full transcripts, raw per-repetition results, logs, and
-`trials.json`/`manifest.json`) lives under `scripts/s3-agent-safety-data/`.
-The report can be regenerated deterministically from a current (schema v4)
-dataset with `python3 scripts/run-s3-agent-safety-experiment --from-data`;
-datasets from earlier schema versions are rejected with an unsupported-schema
-error rather than rendered.
+**Reports vs. raw evidence, and what is tracked.** The generated reports are
+intentionally **not** gitignored and may be committed: the validator-stimulus
+Markdown report (`scripts/cfn-validate-report.md`), the self-contained HTML
+report (`scripts/s3-agent-safety-report.html`), and the one-pass Markdown
+report (`scripts/s3-agent-loop-report.md`). Each is regenerated from scratch
+by running its demo. The disposable raw evidence **is**
+gitignored: the human-readable `.txt` transcripts and their supplementary
+`.jsonl` raw event streams, plus the whole `scripts/s3-agent-safety-data/`
+directory (`trials.json`, `manifest.json`, per-session transcripts, raw
+per-repetition results and reports, and logs). Human-readable `.txt`
+transcripts remain the primary human evidence; the `.jsonl` streams are
+supplementary engineering evidence. The report can be regenerated
+deterministically from a current (schema v4) dataset with
+`python3 scripts/run-s3-agent-safety-experiment --from-data`; datasets from
+earlier schema versions are rejected with an unsupported-schema error rather
+than rendered.
 
 ## Which command should I use?
 

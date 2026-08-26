@@ -21,8 +21,10 @@ to inspect the validator independently of any agent behavior.
 """
 
 import argparse
+import datetime
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -41,6 +43,32 @@ _LOCAL_ENDPOINT = 'http://127.0.0.1:1'
 # any other exit code — including the CLI's reserved client-error 254 — is an
 # unexpected error, not a FINDINGS signal.
 _VALIDATION_FINDINGS_RC = 252
+
+# The fail-closed hook renders its validation-only block to the child's
+# stderr as lines prefixed with this marker (see
+# awscli/customizations/cfnvalidate/hook.py::_render_validation_result). The
+# report reads only what the child actually printed, so parsing keys off this
+# exact prefix.
+_VALIDATE_PREFIX = '[cloudformation-validate]'
+# The only two statuses the report distinguishes; any other or absent value
+# is recorded as 'unknown' and stays 'unknown' (nothing is inferred).
+_KNOWN_STATUSES = ('VALIDATED', 'SKIPPED')
+# The outcome buckets, derived solely from the exact process exit code via
+# _classify_outcome, and the status buckets, parsed from the validator output.
+_OUTCOMES = ('CLEAN', 'FINDINGS', 'ERROR')
+_STATUSES = ('VALIDATED', 'SKIPPED', 'unknown')
+# Severity display order for the report; any other observed severity is
+# appended (sorted) so nothing the validator emitted is dropped.
+_SEVERITY_ORDER = ('FATAL', 'ERROR', 'WARN')
+# A single rendered diagnostic line, e.g.
+#   SEVERITY: message [property_path: some/path]
+# The message capture is greedy so a message containing brackets still splits
+# at the trailing, anchored property_path suffix.
+_DIAGNOSTIC_RE = re.compile(
+    r'^([A-Z][A-Z0-9_]*): (.*) \[property_path: (.*)\]$'
+)
+# Default location of the generated report, relative to the repository root.
+_DEFAULT_REPORT = Path('scripts') / 'cfn-validate-report.md'
 
 
 def _built_aws_candidates():
@@ -710,10 +738,325 @@ def _classify_outcome(returncode):
     return 'ERROR'
 
 
-def _run_case(name, case, aws_executable, env):
-    """Run and display one integrated AWS CLI validate-only example.
+def _strip_prefix(line):
+    """Return the content after ``_VALIDATE_PREFIX``, or ``None``.
 
-    Returns the outcome classification ('CLEAN', 'FINDINGS', or 'ERROR').
+    A line is only a validator line when it begins with the prefix (after
+    optional leading whitespace); anything else — unrelated CLI output — is
+    ignored so it can never be mistaken for a diagnostic.
+    """
+    stripped = line.lstrip()
+    if not stripped.startswith(_VALIDATE_PREFIX):
+        return None
+    return stripped[len(_VALIDATE_PREFIX) :].strip()
+
+
+def _parse_diagnostic_line(content):
+    """Parse one rendered diagnostic line into a structured record.
+
+    Returns ``{'severity', 'message', 'property_path'}`` or ``None`` when the
+    line is not a diagnostic (so template or summary lines are skipped).
+    """
+    match = _DIAGNOSTIC_RE.match(content)
+    if match is None:
+        return None
+    severity, message, property_path = match.groups()
+    return {
+        'severity': severity,
+        'message': message.strip(),
+        'property_path': property_path.strip(),
+    }
+
+
+def _parse_validation_output(text):
+    """Extract the observed validation facts from captured output.
+
+    Reads only what the child printed to the given text (the hook renders its
+    block to stderr): the classification, the VALIDATED/SKIPPED status (any
+    other or absent value stays ``'unknown'``), and each diagnostic's
+    severity, message, and property path. It infers nothing — a run that
+    never rendered a block (for example an unexpected ERROR) yields
+    ``'unknown'`` with no diagnostics. Diagnostics are collected only within
+    the bounded diagnostics section (between the ``diagnostics: N finding(s)``
+    summary and the ``outcome:``/``--- end`` line) so the modeled-template
+    JSON that precedes it can never be misread as a finding.
+    """
+    classification = 'unknown'
+    status = 'unknown'
+    diagnostics = []
+    in_diagnostics = False
+    for line in (text or '').splitlines():
+        content = _strip_prefix(line)
+        if content is None:
+            continue
+        if content.startswith('classification:'):
+            value = content[len('classification:') :].strip()
+            classification = value or 'unknown'
+        elif content.startswith('status:'):
+            token = content[len('status:') :].strip().upper()
+            status = token if token in _KNOWN_STATUSES else 'unknown'
+        elif content.startswith('diagnostics:'):
+            summary = content[len('diagnostics:') :].strip()
+            in_diagnostics = summary != 'none' and 'finding' in summary
+        elif content.startswith('outcome:') or content.startswith('--- end'):
+            in_diagnostics = False
+        elif in_diagnostics:
+            diagnostic = _parse_diagnostic_line(content)
+            if diagnostic is not None:
+                diagnostics.append(diagnostic)
+    return {
+        'classification': classification,
+        'status': status,
+        'diagnostics': diagnostics,
+    }
+
+
+def _pct(count, denominator):
+    """Format ``count``/``denominator`` as a percentage with its fraction.
+
+    Renders as ``'50% (1/2)'`` — a percentage first, then the raw ``k/N`` so
+    the denominator is always visible. An empty denominator is reported as
+    ``'n/a (0/0)'`` so a missing sample never reads as a real ``0%``.
+    """
+    if denominator <= 0:
+        return 'n/a (0/0)'
+    return f'{100 * count / denominator:.0f}% ({count}/{denominator})'
+
+
+def _severity_summary(records):
+    """Return ordered severities plus per-severity case/diagnostic counts.
+
+    ``case_counts`` counts records with at least one diagnostic of a
+    severity; ``diag_counts`` counts every diagnostic of that severity. The
+    canonical FATAL/ERROR/WARN severities are always present (so a run with
+    none reads as explicit zeros), and any other observed severity is
+    appended in sorted order.
+    """
+    case_counts = {}
+    diag_counts = {}
+    for record in records:
+        seen = set()
+        for diagnostic in record['diagnostics']:
+            severity = diagnostic['severity']
+            diag_counts[severity] = diag_counts.get(severity, 0) + 1
+            seen.add(severity)
+        for severity in seen:
+            case_counts[severity] = case_counts.get(severity, 0) + 1
+    extras = sorted(
+        severity
+        for severity in set(diag_counts) | set(case_counts)
+        if severity not in _SEVERITY_ORDER
+    )
+    severities = list(_SEVERITY_ORDER) + extras
+    return severities, case_counts, diag_counts
+
+
+def _diagnostics_cell(diagnostics):
+    """Summarize a case's diagnostics as ``'2 (1 ERROR, 1 WARN)'``.
+
+    Empty diagnostics render as ``'none'``. Severities are ordered
+    FATAL/ERROR/WARN first, then any extra severity in sorted order.
+    """
+    if not diagnostics:
+        return 'none'
+    counts = {}
+    for diagnostic in diagnostics:
+        severity = diagnostic['severity']
+        counts[severity] = counts.get(severity, 0) + 1
+    extras = sorted(s for s in counts if s not in _SEVERITY_ORDER)
+    ordered = [s for s in _SEVERITY_ORDER if s in counts] + extras
+    parts = ', '.join(f'{counts[s]} {s}' for s in ordered)
+    return f'{len(diagnostics)} ({parts})'
+
+
+def _md_cell(value):
+    """Escape a value so it is safe inside a Markdown table cell."""
+    return (
+        str(value)
+        .replace('|', '\\|')
+        .replace('\r\n', ' ')
+        .replace('\n', ' ')
+        .replace('\r', ' ')
+    )
+
+
+def _render_report(records, meta):
+    """Render the run's Markdown report from observed case records alone.
+
+    Everything below is derived solely from ``records`` — the structured
+    observations returned by :func:`_run_case` — and the run metadata in
+    ``meta`` (``generated_at`` and ``aws_executable``). The percentages
+    characterize this fixed, deterministic stimulus case mix; they are not a
+    measure of any agent or AI behavior.
+    """
+    total = len(records)
+    names = [record['name'] for record in records]
+    outcome_counts = {
+        outcome: sum(1 for r in records if r['outcome'] == outcome)
+        for outcome in _OUTCOMES
+    }
+    status_counts = {
+        status: sum(1 for r in records if r['status'] == status)
+        for status in _STATUSES
+    }
+    severities, case_counts, diag_counts = _severity_summary(records)
+    total_diagnostics = sum(len(r['diagnostics']) for r in records)
+    rendered_cases = (
+        ', '.join(f'`{name}`' for name in names) if names else '(none)'
+    )
+
+    lines = [
+        '# cloudformation-validate diagnostic stimulus report',
+        '',
+        (
+            '**Purpose.** This report characterizes the deterministic '
+            '`cloudformation-validate` diagnostic *stimulus* produced by '
+            '`scripts/demo-cfn-validate`. **No agent runs here** — it records '
+            'only what the validator itself emits for a fixed set of AWS '
+            'requests, so the agent-response demos can be read against a known '
+            'stimulus. Every percentage below characterizes this deterministic '
+            'stimulus case mix, **not** AI or agent behavior.'
+        ),
+        '',
+        f'- Generated: {meta.get("generated_at", "unknown")}',
+        f'- AWS CLI: `{meta.get("aws_executable", "unknown")}`',
+        f'- Cases executed ({total}): {rendered_cases}',
+        '',
+        '## Executive summary',
+        '',
+        (
+            "Outcomes are derived solely from each case's exact process exit "
+            'code; statuses and diagnostics are parsed solely from the '
+            'validator output each run emitted. These percentages '
+            'characterize the fixed, deterministic stimulus case mix '
+            'exercised in this run — they are **not** a measure of any agent '
+            'or AI behavior.'
+        ),
+        '',
+        f'Outcome (by exit code) over {total} case(s):',
+        '',
+        f'- CLEAN: {_pct(outcome_counts["CLEAN"], total)}',
+        f'- FINDINGS: {_pct(outcome_counts["FINDINGS"], total)}',
+        f'- ERROR: {_pct(outcome_counts["ERROR"], total)}',
+        '',
+        f'Status (parsed from validator output) over {total} case(s):',
+        '',
+        f'- VALIDATED: {_pct(status_counts["VALIDATED"], total)}',
+        f'- SKIPPED: {_pct(status_counts["SKIPPED"], total)}',
+        f'- unknown: {_pct(status_counts["unknown"], total)}',
+        '',
+        '## Diagnostics by severity',
+        '',
+        (
+            f'Across {total} case(s), {total_diagnostics} diagnostic(s) were '
+            'parsed. **Cases** counts the cases with at least one diagnostic '
+            'of that severity; **Diagnostics** counts every diagnostic of '
+            'that severity.'
+        ),
+        '',
+        '| Severity | Cases | Diagnostics |',
+        '|---|---|---|',
+    ]
+    for severity in severities:
+        lines.append(
+            f'| {severity} | {case_counts.get(severity, 0)} | '
+            f'{diag_counts.get(severity, 0)} |'
+        )
+    lines.extend(
+        [
+            '',
+            '## Per-case results',
+            '',
+            (
+                '| Case | Description | Command | Classification | Status | '
+                'Diagnostics | Outcome | Exit |'
+            ),
+            '|---|---|---|---|---|---|---|---|',
+        ]
+    )
+    for record in records:
+        lines.append(
+            f'| {_md_cell(record["name"])} '
+            f'| {_md_cell(record["description"])} '
+            f'| `{_md_cell(record["command"])}` '
+            f'| {_md_cell(record["classification"])} '
+            f'| {_md_cell(record["status"])} '
+            f'| {_md_cell(_diagnostics_cell(record["diagnostics"]))} '
+            f'| {_md_cell(record["outcome"])} '
+            f'| {record["exit_code"]} |'
+        )
+    lines.extend(
+        [
+            '',
+            '## Severity meanings and method',
+            '',
+            (
+                'Validation runs at the WARN threshold, so only these '
+                'severities surface:'
+            ),
+            '',
+            (
+                '- **FATAL** — a structural deployment failure; the request '
+                'or template cannot deploy as written.'
+            ),
+            (
+                '- **ERROR** — a likely deployment failure or incorrect '
+                'behavior.'
+            ),
+            (
+                '- **WARN** — a security, deprecation, or otherwise '
+                'risky-pattern finding.'
+            ),
+            '',
+            (
+                'Method: every case runs `aws --validate-only ...` in an '
+                'isolated child environment — all inherited `AWS_*` variables '
+                'removed, no credentials set (**credential-free**), IMDS and '
+                'retries disabled, and the global and per-service endpoints '
+                'pinned to an unroutable loopback endpoint. Because '
+                '`--validate-only` always stops before transport (and before '
+                'signing), the run is fully **offline** and makes **no HTTP '
+                'call** to any AWS endpoint.'
+            ),
+            '',
+            '## Related generated reports',
+            '',
+            (
+                'Each of the three reports is generated only by running its '
+                'demo; none is hand-authored:'
+            ),
+            '',
+            (
+                '- `scripts/cfn-validate-report.md` — this validator-stimulus '
+                'report, written by `scripts/demo-cfn-validate`.'
+            ),
+            (
+                '- `scripts/s3-agent-loop-report.md` — the one-pass '
+                'agent-behavior Markdown report, written by '
+                '`scripts/demo-s3-agent-loop`.'
+            ),
+            (
+                '- `scripts/s3-agent-safety-report.html` — the '
+                'repeated-trials, self-contained HTML report, written by '
+                '`scripts/run-s3-agent-safety-experiment`.'
+            ),
+            '',
+        ]
+    )
+    return '\n'.join(lines) + '\n'
+
+
+def _run_case(name, case, aws_executable, env):
+    """Run one integrated AWS CLI validate-only example and observe it.
+
+    The live console view is preserved: the child's stdout and stderr are
+    captured and then immediately replayed to the matching parent streams
+    (stdout to stdout, and the validator's rendered block, which it writes to
+    stderr, to stderr) before the outcome line is printed. The captured
+    output is parsed into a structured observation returned to the caller:
+    the case name, description, display command, classification, VALIDATED/
+    SKIPPED/unknown status, parsed diagnostics and severities, the CLEAN/
+    FINDINGS/ERROR outcome (from the exact exit code), and the exit code.
     """
     command_args = [
         '--validate-only',
@@ -732,7 +1075,23 @@ def _run_case(name, case, aws_executable, env):
     print(f'  $ {display_cmd}')
     print('-' * 70, flush=True)
 
-    result = subprocess.run(cmd, env=env)
+    result = subprocess.run(
+        cmd,
+        env=env,
+        capture_output=True,
+        text=True,
+        errors='replace',
+    )
+    # Preserve the live console view: replay each captured stream to the
+    # matching parent stream before the outcome line, so stdout stays on
+    # stdout and the validator's stderr block stays on stderr.
+    if result.stdout:
+        sys.stdout.write(result.stdout)
+        sys.stdout.flush()
+    if result.stderr:
+        sys.stderr.write(result.stderr)
+        sys.stderr.flush()
+
     # A --validate-only request always stops before transport and renders a
     # CLEAN or FINDINGS outcome: a clean or skipped request exits 0, while a
     # request with findings exits exactly _VALIDATION_FINDINGS_RC. That
@@ -742,7 +1101,19 @@ def _run_case(name, case, aws_executable, env):
     # which the demo reports and then exits nonzero for.
     outcome = _classify_outcome(result.returncode)
     print(f'  outcome: {outcome} (exit {result.returncode})', flush=True)
-    return outcome
+
+    # The validator writes its block to stderr; parse it there.
+    parsed = _parse_validation_output(result.stderr)
+    return {
+        'name': name,
+        'description': case['description'],
+        'command': display_cmd,
+        'classification': parsed['classification'],
+        'status': parsed['status'],
+        'diagnostics': parsed['diagnostics'],
+        'outcome': outcome,
+        'exit_code': result.returncode,
+    }
 
 
 def main():
@@ -769,7 +1140,25 @@ def main():
         choices=list(_cases().keys()),
         help='Run only the specified demonstration case.',
     )
+    parser.add_argument(
+        '--report',
+        help=(
+            'Write the Markdown run report to this path (default: '
+            'scripts/cfn-validate-report.md). Relative paths resolve against '
+            'the repository root. A report is always written from this run\'s '
+            'observed results, even when a case has an unexpected ERROR '
+            'outcome.'
+        ),
+    )
     args = parser.parse_args()
+
+    if args.report:
+        report_path = Path(args.report).expanduser()
+        if not report_path.is_absolute():
+            report_path = _REPOSITORY_ROOT / report_path
+    else:
+        report_path = _REPOSITORY_ROOT / _DEFAULT_REPORT
+    report_path = report_path.resolve()
 
     aws_executable = _resolve_aws_executable(args.aws)
     cases = _cases()
@@ -786,13 +1175,15 @@ def main():
     print(f'Cases: {len(cases)}')
 
     outcomes = {'CLEAN': 0, 'FINDINGS': 0, 'ERROR': 0}
+    records = []
     error_cases = []
     with tempfile.TemporaryDirectory(prefix='demo-cfn-validate-') as temp:
         env = _child_env(Path(temp))
         for name, case in cases.items():
-            outcome = _run_case(name, case, aws_executable, env)
-            outcomes[outcome] += 1
-            if outcome == 'ERROR':
+            record = _run_case(name, case, aws_executable, env)
+            records.append(record)
+            outcomes[record['outcome']] += 1
+            if record['outcome'] == 'ERROR':
                 error_cases.append(name)
 
     print(f'\n{"=" * 70}')
@@ -805,6 +1196,18 @@ def main():
         'For the agent response / self-correction experiment, run '
         'scripts/run-s3-agent-safety-experiment.'
     )
+
+    # Always write the report from this run's observed results — including
+    # runs where a case had an unexpected ERROR outcome — before applying the
+    # existing nonzero-exit semantics below.
+    meta = {
+        'generated_at': datetime.datetime.now().astimezone().isoformat(),
+        'aws_executable': str(aws_executable),
+    }
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(_render_report(records, meta), encoding='utf-8')
+    print(f'Report written: {report_path}')
+
     if error_cases:
         print(
             f'ERROR: {len(error_cases)} case(s) returned an unexpected exit '

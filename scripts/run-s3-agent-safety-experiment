@@ -49,7 +49,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = ROOT / 'scripts'
 HARNESS = SCRIPTS_DIR / 'demo-s3-agent-loop'
-AGENT_DIR = ROOT / '.kiro' / 'agents'
+# Canonical, source-of-truth agent configuration lives OUTSIDE Kiro's
+# auto-discovered root .kiro/ tree; the harness copies it into a throwaway
+# temporary workspace per session. Keep in sync with scripts/demo-s3-agent-loop.
+CONFIG_DIR = SCRIPTS_DIR / 'kiro-agent-config'
+AGENT_DIR = CONFIG_DIR / 'agents'
+SETTINGS_DIR = CONFIG_DIR / 'settings'
 
 # Ordered condition metadata, matching scripts/demo-s3-agent-loop. Each
 # condition is one agent profile: an id, the profile filename stem, a
@@ -1549,7 +1554,9 @@ def _render_methods(trials_doc, manifest, totals):
         '<h2 id="methods-h">Objective &amp; methods</h2>'
         '<p><strong>Objective.</strong> Measure how the agent behaves after '
         'a cloudformation-validate diagnostic: whether it revises the request '
-        'and reaches a clean validation or success, compared across three '
+        'and reaches a clean validation or success, reported as '
+        'finding-response percentages (each k/N with a Wilson 95% '
+        'confidence interval) and compared across three context '
         'conditions \u2014 a baseline told nothing about validation, a '
         'validate-only <em>factual</em> condition given only the neutral fact '
         'that the global --validate-only flag runs the validator and sends no '
@@ -2250,13 +2257,16 @@ def _render_evidence_files(trials_doc, manifest, output_dir=None):
         (
             'transcripts/',
             f'{base}/transcripts/',
-            'One cleaned Kiro transcript per session (rep-NN-<case>.txt).',
+            'Per session: the human-readable cleaned Kiro transcript '
+            '(rep-NN-<case>.txt, primary evidence) and the supplementary raw '
+            'stream-json events (rep-NN-<case>.jsonl).',
         ),
         (
             'raw/',
             f'{base}/raw/',
-            'Raw per-repetition results JSON exactly as written by the '
-            'harness.',
+            'Per repetition: the harness results JSON '
+            '(rep-NN-results.json) and its concrete one-pass Markdown report '
+            '(rep-NN-report.md), exactly as written by the harness.',
         ),
         (
             'logs/',
@@ -2435,13 +2445,24 @@ def _augment_trial(result, rep, endpoint, run_id, transcripts_dir):
         archived_path = transcripts_dir / f'rep-{rep:02d}-{name}.txt'
         archived_path.write_text(transcript_text, encoding='utf-8')
         archived = _rel_to_root(archived_path)
+    # Supplementary engineering evidence: the raw stream-json events. Archive
+    # them next to the human transcript before the current-transcripts scratch
+    # directory is wiped at the end of the run.
+    raw_source = trial.get('raw_events_file')
+    archived_raw = None
+    if raw_source and Path(raw_source).is_file():
+        archived_raw_path = transcripts_dir / f'rep-{rep:02d}-{name}.jsonl'
+        shutil.copy2(raw_source, archived_raw_path)
+        archived_raw = _rel_to_root(archived_raw_path)
     trial.pop('transcript_file', None)
+    trial.pop('raw_events_file', None)
     trial['transcript_text'] = transcript_text
     trial['archived_transcript'] = archived
+    trial['archived_raw_events'] = archived_raw
     return trial
 
 
-def _harness_command(args, results_path, current_transcript_dir):
+def _harness_command(args, results_path, current_transcript_dir, report_path):
     command = [
         sys.executable,
         str(HARNESS),
@@ -2450,6 +2471,8 @@ def _harness_command(args, results_path, current_transcript_dir):
         str(results_path),
         '--transcript-dir',
         str(current_transcript_dir),
+        '--report',
+        str(report_path),
         '--timeout',
         str(args.timeout),
     ]
@@ -2820,7 +2843,10 @@ def _run_experiment(args):
     for rep in range(1, args.repetitions + 1):
         results_path = raw_dir / f'rep-{rep:02d}-results.json'
         log_path = logs_dir / f'rep-{rep:02d}.log'
-        command = _harness_command(args, results_path, current_transcript_dir)
+        report_path = raw_dir / f'rep-{rep:02d}-report.md'
+        command = _harness_command(
+            args, results_path, current_transcript_dir, report_path
+        )
         print(f'\n=== repetition {rep}/{args.repetitions} ===', flush=True)
         # Restore the exact profile bytes before this harness starts so a
         # crashed prior harness cannot contaminate this repetition, and
