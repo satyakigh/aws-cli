@@ -243,10 +243,12 @@ def _cases():
                 'my-demo-bucket-2024',
             ],
         },
-        's3-create-invalid': {
+        's3-create-name-pattern-skipped': {
             'description': (
-                'S3 CreateBucket with invalid bucket name — '
-                'synthesized, pattern violation'
+                'S3 CreateBucket with a bucket name that violates the '
+                'CloudFormation BucketName pattern — SKIPPED, because the '
+                'S3 API does not enforce that pattern the value has no '
+                'lossless representation and the validator refuses to guess'
             ),
             'args': [
                 's3api',
@@ -908,6 +910,45 @@ def _render_report(records, meta):
     lines = [
         '# cloudformation-validate test report',
         '',
+        '## What this shows',
+        '',
+        (
+            f'We ran {total} AWS CLI commands through the validating CLI with '
+            'the `--validate-only` dry run. No AI agent is involved and '
+            'nothing is sent to AWS: this report only records what the '
+            'validator says about each command.'
+        ),
+        '',
+        (
+            f'1. **{outcome_counts["FINDINGS"]} of {total} commands had a '
+            'problem the validator caught** - a setting AWS would reject '
+            '(`FATAL`), one that would likely fail or misbehave (`ERROR`), '
+            'or one that is risky or deprecated (`WARN`). Each finding names '
+            'the rule, the field, and a suggested fix.'
+        ),
+        (
+            f'2. **{status_counts["SKIPPED"]} of {total} commands were not '
+            'checked**, on purpose. The validator only checks a command '
+            'when it can turn it into a CloudFormation resource without '
+            'guessing: read-only calls, data operations, and requests with '
+            'parameters that have no CloudFormation equivalent are left '
+            'alone and go through unchanged.'
+        ),
+        (
+            f'3. **{outcome_counts["ERROR"]} of {total} commands failed '
+            'unexpectedly.**'
+            + (
+                ' The tooling behaved as designed.'
+                if not outcome_counts['ERROR']
+                else ' See the per-case table for details.'
+            )
+        ),
+        '',
+        (
+            'The per-case table below shows, for every command, whether it '
+            'was checked, what was found, and the exit code.'
+        ),
+        '',
         '## Summary',
         '',
         (
@@ -919,20 +960,19 @@ def _render_report(records, meta):
         '',
         (
             f'**Result.** Of {total} cases, '
-            f'{_pct(outcome_counts["CLEAN"], total)} returned a clean result, '
-            f'{_pct(outcome_counts["FINDINGS"], total)} returned one or more '
-            f'diagnostics, and {_pct(outcome_counts["ERROR"], total)} ended '
+            f'{_pct(outcome_counts["CLEAN"], total)} came back clean, '
+            f'{_pct(outcome_counts["FINDINGS"], total)} had one or more '
+            f'findings, and {_pct(outcome_counts["ERROR"], total)} ended '
             'with an unexpected error.'
         ),
         '',
-        f'- Validation ran: {_pct(status_counts["VALIDATED"], total)}',
-        f'- Validation was skipped: {_pct(status_counts["SKIPPED"], total)}',
-        f'- Validation status was unknown: '
-        f'{_pct(status_counts["unknown"], total)}',
+        f'- Checked by the validator: {_pct(status_counts["VALIDATED"], total)}',
+        f'- Skipped on purpose: {_pct(status_counts["SKIPPED"], total)}',
+        f'- Status could not be read: {_pct(status_counts["unknown"], total)}',
         '',
         (
-            'These percentages describe this fixed test set. They do not '
-            'measure agent or model behavior.'
+            'These percentages describe this fixed set of commands. They do '
+            'not measure agent or model behavior.'
         ),
         '',
         '## Methodology',
@@ -951,14 +991,14 @@ def _render_report(records, meta):
             'the validation status and diagnostics from command output:'
         ),
         '',
-        '- **CLEAN** — no diagnostics were returned, or validation was skipped.',
-        '- **FINDINGS** — one or more diagnostics were returned.',
+        '- **CLEAN** — no findings, or the command was skipped on purpose.',
+        '- **FINDINGS** — one or more findings were reported.',
         '- **ERROR** — the command returned an unexpected exit code.',
         '',
         (
-            'Diagnostic severity is reported as **FATAL** (cannot deploy as '
-            'written), **ERROR** (likely failure or incorrect behavior), or '
-            '**WARN** (security, deprecation, or risky configuration).'
+            'Finding severity is reported as **FATAL** (AWS would reject it '
+            'as written), **ERROR** (likely failure or incorrect behavior), '
+            'or **WARN** (security, deprecation, or risky configuration).'
         ),
         '',
         '## Run details',

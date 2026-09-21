@@ -1,16 +1,26 @@
 # cloudformation-validate test report
 
+## What this shows
+
+We ran 24 AWS CLI commands through the validating CLI with the `--validate-only` dry run. No AI agent is involved and nothing is sent to AWS: this report only records what the validator says about each command.
+
+1. **5 of 24 commands had a problem the validator caught** - a setting AWS would reject (`FATAL`), one that would likely fail or misbehave (`ERROR`), or one that is risky or deprecated (`WARN`). Each finding names the rule, the field, and a suggested fix.
+2. **13 of 24 commands were not checked**, on purpose. The validator only checks a command when it can turn it into a CloudFormation resource without guessing: read-only calls, data operations, and requests with parameters that have no CloudFormation equivalent are left alone and go through unchanged.
+3. **0 of 24 commands failed unexpectedly.** The tooling behaved as designed.
+
+The per-case table below shows, for every command, whether it was checked, what was found, and the exit code.
+
 ## Summary
 
 **Purpose.** Show the validator results used as input to the agent behavior demos. **No agent runs in this demo.** It records only the diagnostics returned for a fixed set of AWS CLI requests.
 
-**Result.** Of 24 cases, 75% (18/24) returned a clean result, 25% (6/24) returned one or more diagnostics, and 0% (0/24) ended with an unexpected error.
+**Result.** Of 24 cases, 79% (19/24) came back clean, 21% (5/24) had one or more findings, and 0% (0/24) ended with an unexpected error.
 
-- Validation ran: 50% (12/24)
-- Validation was skipped: 50% (12/24)
-- Validation status was unknown: 0% (0/24)
+- Checked by the validator: 46% (11/24)
+- Skipped on purpose: 54% (13/24)
+- Status could not be read: 0% (0/24)
 
-These percentages describe this fixed test set. They do not measure agent or model behavior.
+These percentages describe this fixed set of commands. They do not measure agent or model behavior.
 
 ## Methodology
 
@@ -18,25 +28,25 @@ Every case runs `aws --validate-only ...` in an isolated child process. Inherite
 
 The report uses the process exit code for the result and parses the validation status and diagnostics from command output:
 
-- **CLEAN** — no diagnostics were returned, or validation was skipped.
-- **FINDINGS** — one or more diagnostics were returned.
+- **CLEAN** — no findings, or the command was skipped on purpose.
+- **FINDINGS** — one or more findings were reported.
 - **ERROR** — the command returned an unexpected exit code.
 
-Diagnostic severity is reported as **FATAL** (cannot deploy as written), **ERROR** (likely failure or incorrect behavior), or **WARN** (security, deprecation, or risky configuration).
+Finding severity is reported as **FATAL** (AWS would reject it as written), **ERROR** (likely failure or incorrect behavior), or **WARN** (security, deprecation, or risky configuration).
 
 ## Run details
 
-- Generated: 2026-08-26T13:33:20.366665-06:00
+- Generated: 2026-09-21T12:55:57.094613-04:00
 - AWS CLI: `/Volumes/workplace/external-tools/aws-cli/build/venv/bin/aws`
-- Cases executed (24): `s3-create-valid`, `s3-create-invalid`, `sns-create-topic-valid`, `lambda-update-valid`, `lambda-update-invalid`, `read-only-list-buckets`, `read-only-describe-instances`, `data-plane-lambda-invoke`, `data-plane-sqs-send-message`, `dynamodb-delete-table`, `dynamodb-create-table-nested`, `ec2-create-sg-unmapped`, `cfn-create-stack-valid-body`, `cfn-create-stack-invalid-body`, `cloudcontrol-create-valid`, `cloudcontrol-create-invalid`, `cloudcontrol-unknown-type`, `cloudcontrol-update-patch`, `s3-create-acl-public-read`, `s3-create-grant-read-public`, `s3-put-bucket-policy-unmapped`, `cfn-s3-access-control-no-ownership`, `cfn-s3-access-control-with-ownership`, `cfn-s3-secure-public-access-block`
+- Cases executed (24): `s3-create-valid`, `s3-create-name-pattern-skipped`, `sns-create-topic-valid`, `lambda-update-valid`, `lambda-update-invalid`, `read-only-list-buckets`, `read-only-describe-instances`, `data-plane-lambda-invoke`, `data-plane-sqs-send-message`, `dynamodb-delete-table`, `dynamodb-create-table-nested`, `ec2-create-sg-unmapped`, `cfn-create-stack-valid-body`, `cfn-create-stack-invalid-body`, `cloudcontrol-create-valid`, `cloudcontrol-create-invalid`, `cloudcontrol-unknown-type`, `cloudcontrol-update-patch`, `s3-create-acl-public-read`, `s3-create-grant-read-public`, `s3-put-bucket-policy-unmapped`, `cfn-s3-access-control-no-ownership`, `cfn-s3-access-control-with-ownership`, `cfn-s3-secure-public-access-block`
 
 ## Diagnostics by severity
 
-Across 24 case(s), 7 diagnostic(s) were parsed. **Cases** counts the cases with at least one diagnostic of that severity; **Diagnostics** counts every diagnostic of that severity.
+Across 24 case(s), 6 diagnostic(s) were parsed. **Cases** counts the cases with at least one diagnostic of that severity; **Diagnostics** counts every diagnostic of that severity.
 
 | Severity | Cases | Diagnostics |
 |---|---|---|
-| FATAL | 4 | 4 |
+| FATAL | 3 | 3 |
 | ERROR | 1 | 1 |
 | WARN | 2 | 2 |
 
@@ -45,7 +55,7 @@ Across 24 case(s), 7 diagnostic(s) were parsed. **Cases** counts the cases with 
 | Case | Description | Command | Classification | Status | Diagnostics | Outcome | Exit |
 |---|---|---|---|---|---|---|---|
 | s3-create-valid | Valid S3 CreateBucket — synthesized, zero findings | `aws --validate-only --region us-east-1 --endpoint-url http://127.0.0.1:1 s3api create-bucket --bucket my-demo-bucket-2024` | CLOUD_FORMATION_CREATE | VALIDATED | none | CLEAN | 0 |
-| s3-create-invalid | S3 CreateBucket with invalid bucket name — synthesized, pattern violation | `aws --validate-only --region us-east-1 --endpoint-url http://127.0.0.1:1 s3api create-bucket --bucket Invalid_Bucket` | CLOUD_FORMATION_CREATE | VALIDATED | 1 (1 FATAL) | FINDINGS | 252 |
+| s3-create-name-pattern-skipped | S3 CreateBucket with a bucket name that violates the CloudFormation BucketName pattern — SKIPPED, because the S3 API does not enforce that pattern the value has no lossless representation and the validator refuses to guess | `aws --validate-only --region us-east-1 --endpoint-url http://127.0.0.1:1 s3api create-bucket --bucket Invalid_Bucket` | CLOUD_FORMATION_CREATE | SKIPPED | none | CLEAN | 0 |
 | sns-create-topic-valid | Valid SNS CreateTopic — synthesized, zero findings | `aws --validate-only --region us-east-1 --endpoint-url http://127.0.0.1:1 sns create-topic --name MyValidTopic` | CLOUD_FORMATION_CREATE | VALIDATED | none | CLEAN | 0 |
 | lambda-update-valid | Valid Lambda UpdateFunctionConfiguration — synthesized update, zero findings | `aws --validate-only --region us-east-1 --endpoint-url http://127.0.0.1:1 lambda update-function-configuration --function-name my-func --memory-size 256` | CLOUD_FORMATION_UPDATE | VALIDATED | none | CLEAN | 0 |
 | lambda-update-invalid | Lambda UpdateFunctionConfiguration with MemorySize below minimum — synthesized update, constraint violation | `aws --validate-only --region us-east-1 --endpoint-url http://127.0.0.1:1 lambda update-function-configuration --function-name my-func --memory-size 7` | CLOUD_FORMATION_UPDATE | VALIDATED | 1 (1 FATAL) | FINDINGS | 252 |

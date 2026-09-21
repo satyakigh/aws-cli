@@ -1438,53 +1438,163 @@ def _render_report(trials_doc, manifest, output_dir=None):
 
     add('# S3 agent validation experiment report')
     add('')
-    add('## Summary')
+
+    # Plain-language findings first. Everything below this section is the
+    # detailed evidence for readers who want the exact counts and intervals.
+    plain_names = {
+        'baseline': 'agents told nothing about validation',
+        'validate-only-factual': (
+            'agents told that a `--validate-only` dry run exists'
+        ),
+        'validate-only-guided': (
+            'agents also told how to read the findings and fix the request'
+        ),
+    }
+
+    def plain_name(ctx):
+        return plain_names.get(ctx, context_name(ctx))
+
+    def plain_count(rate):
+        return f'{rate["numerator"]} of {rate["denominator"]}'
+
+    def path_rate(ctx, path):
+        return behavior_by_context[ctx]['paths'][path]
+
+    other_paths = ('blocked-not-fixed', 'stopped', 'bypass', 'no-diagnostic')
+    other_counts = {
+        ctx: sum(
+            behavior_by_context[ctx]['counts'].get(path, 0)
+            for path in other_paths
+        )
+        for ctx in contexts
+    }
+
+    add('## What this shows')
     add('')
     add(
-        '**Primary result.** After the CLI returned a validation diagnostic, '
-        'the agents corrected the request and reached a clean result at these '
-        f'rates: {primary_summary}.'
+        'We gave an AI coding agent AWS CLI tasks that contained deliberate '
+        'mistakes - for example a CloudFormation stack whose S3 bucket has a '
+        'name AWS would reject, or a public-access setting AWS has '
+        f'deprecated - and repeated each task {repetitions} times under '
+        f'{len(contexts)} setups: '
+        + '; '.join(plain_name(ctx) for ctx in contexts)
+        + '. The AWS CLI used in the test checks every request with '
+        'cloudformation-validate before sending it and refuses to send a '
+        'request that has problems.'
     )
     add('')
     if all_primary_complete:
         add(
-            '**Interpretation.** Every condition reached a clean result in '
-            'every issue-producing test. This sample therefore does not show '
-            'a difference in final correction success. It does show a '
-            'difference in when correction happened.'
-        )
-    elif all_primary_equal:
-        add(
-            '**Interpretation.** The conditions had the same correction rate '
-            'in this sample. The detailed results below show whether their '
-            'execution paths differed.'
+            '1. **Every flagged mistake was fixed.** '
+            + '; '.join(
+                f'{plain_count(primary_rates[ctx])} for {plain_name(ctx)}'
+                for ctx in contexts
+            )
+            + '.'
         )
     else:
         add(
-            '**Interpretation.** Correction rates differed across the three '
-            'conditions. The confidence intervals and individual test '
-            'results below show the sample size and uncertainty.'
+            '1. **How often the agent fixed a flagged mistake:** '
+            + '; '.join(
+                f'{plain_count(primary_rates[ctx])} for {plain_name(ctx)}'
+                for ctx in contexts
+            )
+            + '.'
+        )
+    add(
+        '2. **Knowing about the dry run changed *when* the fix happened.** '
+        + ' '.join(
+            f'{plain_name(ctx).capitalize()} fixed the request before '
+            'sending anything in '
+            f'{plain_count(path_rate(ctx, "fixed-before-live"))} tests and '
+            'sent a flawed request first - which the CLI stopped - in '
+            f'{plain_count(path_rate(ctx, "blocked-then-fixed"))}.'
+            for ctx in contexts
+        )
+    )
+    if any(other_counts.values()):
+        add(
+            '3. **Some tests ended another way** (the agent gave up, never '
+            'fixed the request, tried to bypass validation, or no problem '
+            'was flagged): '
+            + '; '.join(
+                f'{other_counts[ctx]} for {plain_name(ctx)}'
+                for ctx in contexts
+            )
+            + '. The tables below break these down.'
+        )
+        safety_index = 4
+    else:
+        safety_index = 3
+    if signals['boundary_held']:
+        add(
+            f'{safety_index}. **No real AWS account was touched.** Every '
+            'request went to a local stand-in service that accepts only test '
+            'credentials, and all eight safety checks passed.'
+        )
+    else:
+        add(
+            f'{safety_index}. **A safety check failed.** See "Safety checks" '
+            'below before drawing any conclusion from this run.'
         )
     add('')
-    add(f'- Corrected before any live request — {fixed_summary}.')
     add(
-        '- Validation blocked a live request with unresolved diagnostics, '
-        f'after which the agent corrected it — {blocked_summary}.'
+        'The rest of this report gives the exact counts, confidence intervals, '
+        'and per-test details behind these statements.'
+    )
+    add('')
+
+    add('## Summary')
+    add('')
+    add(
+        '**Main result.** When the CLI flagged a mistake, the agent fixed the '
+        f'request and got a clean result at these rates: {primary_summary}.'
+    )
+    add('')
+    if all_primary_complete:
+        add(
+            '**Interpretation.** Every setup fixed every flagged mistake, so '
+            'this sample shows no difference in whether the agent got it '
+            'right. It does show a difference in when: whether the agent '
+            'checked first or had to be stopped first.'
+        )
+    elif all_primary_equal:
+        add(
+            '**Interpretation.** The setups fixed the same share of mistakes '
+            'in this sample. The detailed results below show whether they '
+            'got there differently.'
+        )
+    else:
+        add(
+            '**Interpretation.** The setups fixed different shares of the '
+            'mistakes. The confidence intervals and individual test results '
+            'below show the sample size and uncertainty.'
+        )
+    add('')
+    add(f'- Fixed before sending anything — {fixed_summary}.')
+    add(
+        '- Sent a flawed request first, was stopped by the CLI, then fixed '
+        f'it — {blocked_summary}.'
     )
     boundary = 'HELD' if signals['boundary_held'] else 'FAILED'
     add(
-        f'- Local test safety boundary — **{boundary}**. '
+        f'- Test safety — **{boundary}**. '
         + (
-            'All eight safety checks were clear.'
+            'No real AWS account was involved; all eight safety checks passed.'
             if signals['boundary_held']
             else 'One or more safety checks failed; see Safety checks.'
         )
     )
     generated = manifest.get('generated_at') or trials_doc.get('generated_at')
     model = manifest.get('model', 'not exposed')
+    model_text = (
+        'The harness does not record which model Kiro used.'
+        if model == 'not exposed'
+        else f'Model: {model}.'
+    )
     add(
         f'- Test size — {len(trials)} sessions: {repetitions} repetitions × '
-        f'{len(cases)} cases × {len(contexts)} conditions. Model: {model}. '
+        f'{len(cases)} cases × {len(contexts)} setups. {model_text} '
         f'Generated: {generated}.'
     )
     add('')
@@ -1553,23 +1663,29 @@ def _render_report(trials_doc, manifest, output_dir=None):
 
     add('## Results by condition')
     add('')
+    add(
+        'Each row is one measure; each column is one setup. Cells show the '
+        'share of tests, the count behind it, and a 95% confidence interval '
+        'that reflects how small the sample is.'
+    )
+    add('')
     headers = ' | '.join(md_cell(context_name(ctx)) for ctx in contexts)
     add(f'| Measure | {headers} |')
     add('|---' + '|---' * len(contexts) + '|')
     add(
         condition_value_row(
-            'Issue-producing tests',
+            'Tests with a deliberate mistake',
             lambda ctx: outcome_by_context[ctx]['denominator'],
         )
     )
     add(
         condition_rate_row(
-            'Diagnostic returned', lambda ctx: diagnostic_observed[ctx]
+            'The CLI flagged the mistake', lambda ctx: diagnostic_observed[ctx]
         )
     )
     add(
         condition_rate_row(
-            '**Corrected and reached a clean result**',
+            '**The agent fixed the mistake**',
             lambda ctx: outcome_by_context[ctx]['outcomes'][
                 'corrected-to-clean'
             ],
@@ -1577,13 +1693,13 @@ def _render_report(trials_doc, manifest, output_dir=None):
     )
     add(
         condition_rate_row(
-            'Corrected before any live request',
+            'Fixed it before sending anything',
             lambda ctx: behavior_by_context[ctx]['paths']['fixed-before-live'],
         )
     )
     add(
         condition_rate_row(
-            'Validation blocked a live request, then agent corrected it',
+            'Sent a flawed request first, was stopped, then fixed it',
             lambda ctx: behavior_by_context[ctx]['paths'][
                 'blocked-then-fixed'
             ],
@@ -1591,13 +1707,13 @@ def _render_report(trials_doc, manifest, output_dir=None):
     )
     add(
         condition_rate_row(
-            'Validation blocked a live request; no clean correction followed',
+            'Was stopped and never fixed it',
             lambda ctx: behavior_by_context[ctx]['paths']['blocked-not-fixed'],
         )
     )
     add(
         condition_rate_row(
-            'Agent attempted live execution before resolving diagnostics',
+            'Tried to send a request that still had problems',
             lambda ctx: independent[ctx][
                 'attempted_unresolved_live_execution'
             ],
@@ -1605,7 +1721,7 @@ def _render_report(trials_doc, manifest, output_dir=None):
     )
     add(
         condition_rate_row(
-            'Validation blocked that unresolved live execution',
+            'The CLI stopped that request',
             lambda ctx: independent[ctx][
                 'hook_blocked_unresolved_live_execution'
             ],
@@ -1613,25 +1729,25 @@ def _render_report(trials_doc, manifest, output_dir=None):
     )
     add(
         condition_rate_row(
-            'Correction attempted after a diagnostic',
+            'Tried a fix after the mistake was flagged',
             lambda ctx: efficiency[ctx]['correction_attempted'],
         )
     )
     add(
         condition_rate_row(
-            'First correction reached a clean result',
+            'The first fix was right',
             lambda ctx: efficiency[ctx]['first_correction_clean'],
         )
     )
     add(
         condition_value_row(
-            'Calls to reach a clean result',
+            'Commands needed to get it right',
             lambda ctx: stat_cell(efficiency[ctx]['calls_to_clean']),
         )
     )
     add(
         condition_value_row(
-            'Seconds to reach a clean result',
+            'Seconds needed to get it right',
             lambda ctx: stat_cell(
                 efficiency[ctx]['seconds_to_clean'], include_mean=False
             ),
@@ -1639,7 +1755,7 @@ def _render_report(trials_doc, manifest, output_dir=None):
     )
     add(
         condition_rate_row(
-            'Used `--validate-only` (secondary)',
+            'Used the `--validate-only` dry run',
             lambda ctx: mechanism[ctx]['validate_only'],
         )
     )

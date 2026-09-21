@@ -181,25 +181,25 @@ class CfnValidateHook:
         is_read_only,
         parameters,
     ):
-        """Run validation and return the full result object."""
-        from cloudformation_validate import (
-            AwsApiRequest,
-            Severity,
-            ValidateConfig,
-        )
+        """Run validation and return the full result object.
+
+        The validation configuration is fixed by the library for CLI
+        commands: STANDARD detail level gated at WARN severity, so every
+        embedding reports the same findings for the same command. A skipped
+        command has ``report is None`` with an explicit status and reason.
+        """
+        from cloudformation_validate import AwsCliCommand
 
         engine = _get_engine()
-        request = AwsApiRequest(
-            service_name=service_name,
-            operation_name=operation_name,
-            parameters=parameters,
+        request = AwsCliCommand(
+            service_name,
+            operation_name,
+            parameters,
             service_prefix=service_prefix,
             http_method=http_method,
             is_read_only=is_read_only,
         )
-        return engine.validate_aws_api_request(
-            request, ValidateConfig(severity_level=Severity.WARN)
-        )
+        return engine.validate_aws_cli_command(request)
 
 
 def _render_validation_result(result, diagnostics, stream=None):
@@ -253,6 +253,7 @@ def _render_validation_result(result, diagnostics, stream=None):
                 f'[cloudformation-validate]   {d.severity.name}: '
                 f'{d.message} [property_path: {path}]\n'
             )
+            _render_diagnostic_details(d, out)
     else:
         out.write('[cloudformation-validate] diagnostics: none\n')
 
@@ -278,6 +279,22 @@ def _render_template_bytes(template_bytes, out):
         out.write(f'[cloudformation-validate]   {line}\n')
 
 
+def _render_diagnostic_details(diagnostic, out):
+    """Write the rule ID and any suggested fix beneath a rendered diagnostic.
+
+    These are indented detail lines that never start with a severity name, so
+    consumers that parse the ``SEVERITY: message`` primary lines are unaffected.
+    """
+    out.write(f'[cloudformation-validate]     rule: {diagnostic.rule_id}\n')
+    suggested_fix = diagnostic.suggested_fix
+    if not suggested_fix:
+        return
+    first, *rest = str(suggested_fix).splitlines() or ['']
+    out.write(f'[cloudformation-validate]     suggested_fix: {first}\n')
+    for line in rest:
+        out.write(f'[cloudformation-validate]       {line}\n')
+
+
 def _render_diagnostics(diagnostics, stream=None):
     """Write findings to stderr."""
     if not diagnostics:
@@ -294,6 +311,7 @@ def _render_diagnostics(diagnostics, stream=None):
             f'[cloudformation-validate]   {d.severity.name}: '
             f'{d.message}{path}\n'
         )
+        _render_diagnostic_details(d, out)
     count = len(diagnostics)
     label = 'finding' if count == 1 else 'findings'
     out.write(f'[cloudformation-validate] {count} {label}\n')

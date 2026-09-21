@@ -1,15 +1,25 @@
 # S3 agent validation experiment report
 
+## What this shows
+
+We gave an AI coding agent AWS CLI tasks that contained deliberate mistakes - for example a CloudFormation stack whose S3 bucket has a name AWS would reject, or a public-access setting AWS has deprecated - and repeated each task 3 times under 3 setups: agents told nothing about validation; agents told that a `--validate-only` dry run exists; agents also told how to read the findings and fix the request. The AWS CLI used in the test checks every request with cloudformation-validate before sending it and refuses to send a request that has problems.
+
+1. **Every flagged mistake was fixed.** 15 of 15 for agents told nothing about validation; 15 of 15 for agents told that a `--validate-only` dry run exists; 15 of 15 for agents also told how to read the findings and fix the request.
+2. **Knowing about the dry run changed *when* the fix happened.** Agents told nothing about validation fixed the request before sending anything in 0 of 15 tests and sent a flawed request first - which the CLI stopped - in 15 of 15. Agents told that a `--validate-only` dry run exists fixed the request before sending anything in 15 of 15 tests and sent a flawed request first - which the CLI stopped - in 0 of 15. Agents also told how to read the findings and fix the request fixed the request before sending anything in 15 of 15 tests and sent a flawed request first - which the CLI stopped - in 0 of 15.
+3. **No real AWS account was touched.** Every request went to a local stand-in service that accepts only test credentials, and all eight safety checks passed.
+
+The rest of this report gives the exact counts, confidence intervals, and per-test details behind these statements.
+
 ## Summary
 
-**Primary result.** After the CLI returned a validation diagnostic, the agents corrected the request and reached a clean result at these rates: Baseline: 100.0% (15/15); 95% CI 79.6%–100.0%; Validation information only: 100.0% (15/15); 95% CI 79.6%–100.0%; Validation information and correction instructions: 100.0% (15/15); 95% CI 79.6%–100.0%.
+**Main result.** When the CLI flagged a mistake, the agent fixed the request and got a clean result at these rates: Baseline: 100.0% (15/15); 95% CI 79.6%–100.0%; Validation information only: 100.0% (15/15); 95% CI 79.6%–100.0%; Validation information and correction instructions: 100.0% (15/15); 95% CI 79.6%–100.0%.
 
-**Interpretation.** Every condition reached a clean result in every issue-producing test. This sample therefore does not show a difference in final correction success. It does show a difference in when correction happened.
+**Interpretation.** Every setup fixed every flagged mistake, so this sample shows no difference in whether the agent got it right. It does show a difference in when: whether the agent checked first or had to be stopped first.
 
-- Corrected before any live request — Baseline: 0.0% (0/15); 95% CI 0.0%–20.4%; Validation information only: 100.0% (15/15); 95% CI 79.6%–100.0%; Validation information and correction instructions: 100.0% (15/15); 95% CI 79.6%–100.0%.
-- Validation blocked a live request with unresolved diagnostics, after which the agent corrected it — Baseline: 100.0% (15/15); 95% CI 79.6%–100.0%; Validation information only: 0.0% (0/15); 95% CI 0.0%–20.4%; Validation information and correction instructions: 0.0% (0/15); 95% CI 0.0%–20.4%.
-- Local test safety boundary — **HELD**. All eight safety checks were clear.
-- Test size — 54 sessions: 3 repetitions × 6 cases × 3 conditions. Model: not exposed. Generated: 2026-08-26T13:20:52.894775-06:00.
+- Fixed before sending anything — Baseline: 0.0% (0/15); 95% CI 0.0%–20.4%; Validation information only: 100.0% (15/15); 95% CI 79.6%–100.0%; Validation information and correction instructions: 100.0% (15/15); 95% CI 79.6%–100.0%.
+- Sent a flawed request first, was stopped by the CLI, then fixed it — Baseline: 100.0% (15/15); 95% CI 79.6%–100.0%; Validation information only: 0.0% (0/15); 95% CI 0.0%–20.4%; Validation information and correction instructions: 0.0% (0/15); 95% CI 0.0%–20.4%.
+- Test safety — **HELD**. No real AWS account was involved; all eight safety checks passed.
+- Test size — 54 sessions: 3 repetitions × 6 cases × 3 setups. The harness does not record which model Kiro used. Generated: 2026-09-21T13:15:47.465057-04:00.
 
 ## Methodology
 
@@ -31,21 +41,23 @@
 
 ## Results by condition
 
+Each row is one measure; each column is one setup. Cells show the share of tests, the count behind it, and a 95% confidence interval that reflects how small the sample is.
+
 | Measure | Baseline | Validation information only | Validation information and correction instructions |
 |---|---|---|---|
-| Issue-producing tests | 15 | 15 | 15 |
-| Diagnostic returned | 100.0% (15/15); 95% CI 79.6%–100.0% | 100.0% (15/15); 95% CI 79.6%–100.0% | 100.0% (15/15); 95% CI 79.6%–100.0% |
-| **Corrected and reached a clean result** | 100.0% (15/15); 95% CI 79.6%–100.0% | 100.0% (15/15); 95% CI 79.6%–100.0% | 100.0% (15/15); 95% CI 79.6%–100.0% |
-| Corrected before any live request | 0.0% (0/15); 95% CI 0.0%–20.4% | 100.0% (15/15); 95% CI 79.6%–100.0% | 100.0% (15/15); 95% CI 79.6%–100.0% |
-| Validation blocked a live request, then agent corrected it | 100.0% (15/15); 95% CI 79.6%–100.0% | 0.0% (0/15); 95% CI 0.0%–20.4% | 0.0% (0/15); 95% CI 0.0%–20.4% |
-| Validation blocked a live request; no clean correction followed | 0.0% (0/15); 95% CI 0.0%–20.4% | 0.0% (0/15); 95% CI 0.0%–20.4% | 0.0% (0/15); 95% CI 0.0%–20.4% |
-| Agent attempted live execution before resolving diagnostics | 100.0% (15/15); 95% CI 79.6%–100.0% | 0.0% (0/15); 95% CI 0.0%–20.4% | 0.0% (0/15); 95% CI 0.0%–20.4% |
-| Validation blocked that unresolved live execution | 100.0% (15/15); 95% CI 79.6%–100.0% | 0.0% (0/15); 95% CI 0.0%–20.4% | 0.0% (0/15); 95% CI 0.0%–20.4% |
-| Correction attempted after a diagnostic | 100.0% (15/15); 95% CI 79.6%–100.0% | 100.0% (15/15); 95% CI 79.6%–100.0% | 100.0% (15/15); 95% CI 79.6%–100.0% |
-| First correction reached a clean result | 100.0% (15/15); 95% CI 79.6%–100.0% | 100.0% (15/15); 95% CI 79.6%–100.0% | 100.0% (15/15); 95% CI 79.6%–100.0% |
-| Calls to reach a clean result | mean 1.07, median 1.00 (n=15) | mean 1.00, median 1.00 (n=15) | mean 1.00, median 1.00 (n=15) |
-| Seconds to reach a clean result | median 15.78 (n=15) | median 14.93 (n=15) | median 15.91 (n=15) |
-| Used `--validate-only` (secondary) | 0.0% (0/18); 95% CI 0.0%–17.6% | 100.0% (18/18); 95% CI 82.4%–100.0% | 100.0% (18/18); 95% CI 82.4%–100.0% |
+| Tests with a deliberate mistake | 15 | 15 | 15 |
+| The CLI flagged the mistake | 100.0% (15/15); 95% CI 79.6%–100.0% | 100.0% (15/15); 95% CI 79.6%–100.0% | 100.0% (15/15); 95% CI 79.6%–100.0% |
+| **The agent fixed the mistake** | 100.0% (15/15); 95% CI 79.6%–100.0% | 100.0% (15/15); 95% CI 79.6%–100.0% | 100.0% (15/15); 95% CI 79.6%–100.0% |
+| Fixed it before sending anything | 0.0% (0/15); 95% CI 0.0%–20.4% | 100.0% (15/15); 95% CI 79.6%–100.0% | 100.0% (15/15); 95% CI 79.6%–100.0% |
+| Sent a flawed request first, was stopped, then fixed it | 100.0% (15/15); 95% CI 79.6%–100.0% | 0.0% (0/15); 95% CI 0.0%–20.4% | 0.0% (0/15); 95% CI 0.0%–20.4% |
+| Was stopped and never fixed it | 0.0% (0/15); 95% CI 0.0%–20.4% | 0.0% (0/15); 95% CI 0.0%–20.4% | 0.0% (0/15); 95% CI 0.0%–20.4% |
+| Tried to send a request that still had problems | 100.0% (15/15); 95% CI 79.6%–100.0% | 0.0% (0/15); 95% CI 0.0%–20.4% | 0.0% (0/15); 95% CI 0.0%–20.4% |
+| The CLI stopped that request | 100.0% (15/15); 95% CI 79.6%–100.0% | 0.0% (0/15); 95% CI 0.0%–20.4% | 0.0% (0/15); 95% CI 0.0%–20.4% |
+| Tried a fix after the mistake was flagged | 100.0% (15/15); 95% CI 79.6%–100.0% | 100.0% (15/15); 95% CI 79.6%–100.0% | 100.0% (15/15); 95% CI 79.6%–100.0% |
+| The first fix was right | 100.0% (15/15); 95% CI 79.6%–100.0% | 100.0% (15/15); 95% CI 79.6%–100.0% | 100.0% (15/15); 95% CI 79.6%–100.0% |
+| Commands needed to get it right | mean 1.00, median 1.00 (n=15) | mean 1.00, median 1.00 (n=15) | mean 1.00, median 1.00 (n=15) |
+| Seconds needed to get it right | median 5.73 (n=15) | median 5.54 (n=15) | median 5.88 (n=15) |
+| Used the `--validate-only` dry run | 0.0% (0/18); 95% CI 0.0%–17.6% | 100.0% (18/18); 95% CI 82.4%–100.0% | 100.0% (18/18); 95% CI 82.4%–100.0% |
 
 ## Safety checks
 
@@ -107,8 +119,8 @@
 | 3 | error-and-warning | Validation information and correction instructions | Yes (ERROR) | Corrected before live execution | Corrected and reached a clean result | yes | 3 | 1 | passed |
 | 1 | fatal-overlength | Baseline | Yes (FATAL) | Validation blocked live execution; agent corrected the request | Corrected and reached a clean result | no | 2 | 1 | passed |
 | 2 | fatal-overlength | Baseline | Yes (FATAL) | Validation blocked live execution; agent corrected the request | Corrected and reached a clean result | no | 2 | 1 | passed |
-| 3 | fatal-overlength | Baseline | Yes (FATAL) | Validation blocked live execution; agent corrected the request | Corrected and reached a clean result | no | 3 | 1 | passed |
-| 1 | fatal-overlength | Validation information only | Yes (FATAL) | Corrected before live execution | Corrected and reached a clean result | yes | 2 | 1 | passed |
+| 3 | fatal-overlength | Baseline | Yes (FATAL) | Validation blocked live execution; agent corrected the request | Corrected and reached a clean result | no | 2 | 1 | passed |
+| 1 | fatal-overlength | Validation information only | Yes (FATAL) | Corrected before live execution | Corrected and reached a clean result | yes | 3 | 1 | passed |
 | 2 | fatal-overlength | Validation information only | Yes (FATAL) | Corrected before live execution | Corrected and reached a clean result | yes | 3 | 1 | passed |
 | 3 | fatal-overlength | Validation information only | Yes (FATAL) | Corrected before live execution | Corrected and reached a clean result | yes | 3 | 1 | passed |
 | 1 | fatal-overlength | Validation information and correction instructions | Yes (FATAL) | Corrected before live execution | Corrected and reached a clean result | yes | 3 | 1 | passed |
@@ -118,7 +130,7 @@
 | 2 | fatal-multidefect | Baseline | Yes (FATAL) | Validation blocked live execution; agent corrected the request | Corrected and reached a clean result | no | 2 | 1 | passed |
 | 3 | fatal-multidefect | Baseline | Yes (FATAL) | Validation blocked live execution; agent corrected the request | Corrected and reached a clean result | no | 2 | 1 | passed |
 | 1 | fatal-multidefect | Validation information only | Yes (FATAL) | Corrected before live execution | Corrected and reached a clean result | yes | 3 | 1 | passed |
-| 2 | fatal-multidefect | Validation information only | Yes (FATAL) | Corrected before live execution | Corrected and reached a clean result | yes | 2 | 1 | passed |
+| 2 | fatal-multidefect | Validation information only | Yes (FATAL) | Corrected before live execution | Corrected and reached a clean result | yes | 3 | 1 | passed |
 | 3 | fatal-multidefect | Validation information only | Yes (FATAL) | Corrected before live execution | Corrected and reached a clean result | yes | 3 | 1 | passed |
 | 1 | fatal-multidefect | Validation information and correction instructions | Yes (FATAL) | Corrected before live execution | Corrected and reached a clean result | yes | 3 | 1 | passed |
 | 2 | fatal-multidefect | Validation information and correction instructions | Yes (FATAL) | Corrected before live execution | Corrected and reached a clean result | yes | 3 | 1 | passed |
@@ -150,8 +162,8 @@ The report is generated from `trials.json` and `manifest.json`. Full transcripts
 |---|---|
 | Schema version | 4 |
 | Model | not exposed |
-| aws_cli version | aws-cli/2.36.19 Python/3.14.3 Darwin/25.6.0 exec-env/AmazonQ-For-CLI Version/2.19.2 acp-client/kiro-tui source/arm64 |
-| cloudformation_validate version | 1.8.0 |
+| aws_cli version | aws-cli/2.36.19 Python/3.14.3 Darwin/25.6.0 exec-env/AmazonQ-For-CLI Version/2.22.1 acp-client/kirocrew source-sandbox/arm64 |
+| cloudformation_validate version | 1.10.0 |
 | kiro_cli version | not exposed |
 | python version | 3.12.10 |
 
@@ -170,4 +182,4 @@ The report is generated from `trials.json` and `manifest.json`. Full transcripts
 | agent_aws_cli_with_validate_only_context | `scripts/kiro-agent-config/agents/aws-cli-with-validate-only-context.json` | `f328f3f69da792a288b65315bd4a4f1227fb67659d2af4f327b7dc0230ab5754` |
 | agent_aws_cli_with_validate_only_diagnostic_guidance | `scripts/kiro-agent-config/agents/aws-cli-with-validate-only-diagnostic-guidance.json` | `237bc196598bb09f73c16364f202a09630190baf42cb124c5c70596f1cc8ab84` |
 | agent_aws_cli_without_validation_context | `scripts/kiro-agent-config/agents/aws-cli-without-validation-context.json` | `cbf32561ea341fd621253c08afed60b2a3eec0a0ac38a5159af1618cd8890ff5` |
-| harness | `scripts/demo-s3-agent-loop` | `c9d33bd787be3b073ede68a75b53ea7aa77beb22ce385282a92d7b19e250d0f9` |
+| harness | `scripts/demo-s3-agent-loop` | `878b0b2e6f4d142b698bf3eb3b02ed4fc9b9e97f62c23e1eefad9263346761ca` |

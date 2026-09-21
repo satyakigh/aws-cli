@@ -20,7 +20,6 @@ import sys
 from constants import (
     BIN_DIRNAME,
     CFN_VALIDATE_REQUIREMENTS,
-    CFN_VALIDATE_WHEEL_DIR,
     CLI_SCRIPTS,
     DISTRIBUTION_SOURCE_SANDBOX,
     DOWNLOAD_DEPS_BOOTSTRAP_LOCK,
@@ -85,17 +84,17 @@ class AwsCliVenv:
         )
 
     def _install_cfn_validate(self):
+        # cloudformation-validate ships native (UniFFI) wheels for every
+        # supported platform on PyPI and has no runtime dependencies, so it is
+        # installed from the index as a binary-only, hash-pinned requirement
+        # rather than from a vendored wheel.
         self._pip_install(
             [
                 "--no-build-isolation",
                 "--no-cache-dir",
-                "--no-index",
                 "--only-binary=:all:",
-                "--find-links",
-                str(CFN_VALIDATE_WHEEL_DIR),
                 "--require-hashes",
                 "--no-deps",
-                "--force-reinstall",
                 "-r",
                 str(CFN_VALIDATE_REQUIREMENTS),
             ]
