@@ -78,3 +78,24 @@ autom4te.cache
 /install-sh
 /missing
 /stamp-h1
+
+# Kiro local runtime/user state. The demo's canonical, source-of-truth agent
+# profiles and workspace settings live under scripts/kiro-agent-config/ and
+# are copied into a throwaway temporary workspace per Kiro session; nothing
+# under the auto-discovered root .kiro/ is tracked.
+/.kiro/
+scripts/*.log
+scripts/*.png
+playwright-responses/
+
+# Agent safety experiment outputs. The generated Markdown reports are
+# intentionally NOT ignored. The raw, disposable evidence is: human-readable
+# .txt transcripts, supplementary .jsonl raw event streams, and the aggregated
+# data directory.
+/scripts/*-baseline.txt
+/scripts/*-validate-only-factual.txt
+/scripts/*-validate-only-guided.txt
+/scripts/*-baseline.jsonl
+/scripts/*-validate-only-factual.jsonl
+/scripts/*-validate-only-guided.jsonl
+/scripts/s3-agent-safety-data/

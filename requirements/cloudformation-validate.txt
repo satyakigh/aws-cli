@@ -1,0 +1,11 @@
+# cloudformation-validate runtime dependency, installed from PyPI by
+# backends/build_system (AwsCliVenv._install_cfn_validate) with
+# --require-hashes --only-binary=:all: --no-deps. The package has no runtime
+# dependencies of its own. One hash per published platform wheel for 1.10.0:
+# macOS x86_64, macOS arm64, manylinux aarch64, manylinux x86_64, win_amd64.
+cloudformation-validate==1.10.0 \
+    --hash=sha256:1b0056cfb3470bce4b0f30cd395d9a1a0b402b9964cb498640aeb1a48ff53903 \
+    --hash=sha256:c53a8ea2a964ddcf9c7f65c7bf667dc0d789ef7ace995adf5349ba8395f3918f \
+    --hash=sha256:ebb702b87277685a36fb4ad4a77ce5af354cc0644539799388e23134a5242317 \
+    --hash=sha256:f761389468c2cddacf03267d21a7c2a2a91f6f5e6b64faa4eb62a8db4eb628e2 \
+    --hash=sha256:95d5fdf3fb590b013a10d7633cbeb1b3e1f9f1326dba557d648db9b73709181f
